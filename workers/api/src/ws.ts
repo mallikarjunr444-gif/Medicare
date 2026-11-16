@@ -279,29 +279,32 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         });
       }
       send({ type: "status", message: "Thinking…", stage: "llm" });
-      await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'user',$3)`, [
+      // Save the user's message, load history and (for kn/hi) translate for retrieval all at once:
+      // none depends on another, so this costs one round trip instead of three.
+      const saveUser = query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'user',$3)`, [
         crypto.randomUUID(),
         sessionId,
         text,
       ]);
-      const hist = (
-        await query(`SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at DESC LIMIT 14`, [
-          sessionId,
-        ])
-      ).reverse() as Chat[];
-      let searchText = text;
-      if (language !== "en" && env.AI) {
+      const loadHist = query(`SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at DESC LIMIT 14`, [
+        sessionId,
+      ]);
+      const translate = (async () => {
+        if (language === "en" || !env.AI) return text;
         // Knowledge base is English: get an English search phrase for Kannada/Hindi input.
         try {
           const t: any = await env.AI.run(env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct", {
             messages: [{ role: "user", content: `Translate to English, output only the translation:\n${text}` }],
             max_tokens: 80,
           });
-          searchText = String(t?.response ?? text);
+          return String(t?.response ?? text);
         } catch {
-          /* fall back to original text */
+          return text; /* fall back to original text */
         }
-      }
+      })();
+      const [, prior, searchText] = await Promise.all([saveUser, loadHist, translate]);
+      // The history was read before the new message landed, so add it here (kept out of the DB race).
+      const hist = [...(prior as Chat[]).reverse(), { role: "user", content: text } as Chat];
       // Deterministic emergency escalation runs before any AI reply (same rules as the Python service).
       const triage = [text, searchText].map(evaluatePatientQuery).find((t) => t.is_emergency);
       if (triage) {
@@ -318,12 +321,13 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist], language, (t) => send({ type: "token", token: t }), mine);
       if (mine.aborted) return;
       const content = validateAiResponse(reply.trim()) || "I'm here. Could you tell me a little more?";
+      // Deliver first; persisting is not on the user's critical path.
+      send({ type: "message", role: "assistant", content });
       await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [
         crypto.randomUUID(),
         sessionId,
         content,
       ]);
-      send({ type: "message", role: "assistant", content });
     } catch (e) {
       console.error("ws_turn_failed", String((e as Error).message).slice(0, 200));
       send({ type: "error", message: "The free AI service is busy or has used up its daily allowance. Please try again in a little while." });

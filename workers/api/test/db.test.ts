@@ -30,4 +30,19 @@ describe("neon http client", () => {
     await expect(neonQuery(env, f)("SELECT 1")).rejects.toThrow(/neon_http_400:42P01/);
     await expect(neonQuery(env, f)("SELECT 1")).rejects.not.toThrow(/u:p@/);
   });
+
+  it("retries a read once on 503 but never retries a write", async () => {
+    let calls = 0;
+    const flaky = (async () => {
+      calls++;
+      return calls === 1
+        ? new Response("{}", { status: 503 })
+        : new Response(JSON.stringify({ fields: [{ name: "n", dataTypeID: 23 }], rows: [["1"]] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await neonQuery(env, flaky)("SELECT 1 AS n")).toEqual([{ n: 1 }]);
+    expect(calls).toBe(2);
+    calls = 0;
+    await expect(neonQuery(env, flaky)("INSERT INTO t VALUES (1)")).rejects.toThrow(/neon_http_503/);
+    expect(calls).toBe(1);
+  });
 });
