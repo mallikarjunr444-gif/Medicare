@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Anchor module resolution to this app. Without it Turbopack walks up to a
+  // lockfile outside the repository and warns on every build.
+  turbopack: { root: __dirname },
   // Static export: the site has no server routes, so it can be hosted on any
   // static host (Firebase Hosting free plan) with no Node server.
   output: 'export',

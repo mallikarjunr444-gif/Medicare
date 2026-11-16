@@ -6,6 +6,12 @@ import type { Env, Query } from "./env";
 const LANGS: Record<string, string> = { kn: "Kannada (ಕನ್ನಡ script)", en: "English", hi: "Hindi (देवनागरी script)" };
 const MAX_TEXT = 4000;
 
+/** Only the consultation languages the prompts know about may reach the model. */
+export function normaliseLanguage(value: unknown): string {
+  const code = String(value ?? "en").trim().toLowerCase().replace("_", "-").split("-")[0];
+  return Object.hasOwn(LANGS, code) ? code : "en";
+}
+
 const STOP = new Set("the and for are but not you your have has had with that this from they them what when where which who whom how why can could would should will was were been being about into than then there here also just very some any more most such only over after before again does did doing its our out off too few own same both each other these those".split(" "));
 
 /** OR-query over the user's words so natural sentences still match. */
@@ -217,7 +223,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       case "ping":
         return send({ type: "pong" });
       case "set_language":
-        language = String(data.language || "en").replace("_", "-").split("-")[0].toLowerCase();
+        language = normaliseLanguage(data.language);
         return;
       case "stop":
       case "interrupt":

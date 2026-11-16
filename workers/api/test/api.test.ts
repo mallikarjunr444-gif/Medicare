@@ -170,8 +170,10 @@ describe("sessions + messages", () => {
   beforeAll(async () => {
     token = await guest();
     other = await guest();
-    const uid = (await db.query("SELECT id FROM users ORDER BY created_at DESC OFFSET 1 LIMIT 1")).rows[0] as any;
-    await db.query("INSERT INTO avatars (id,user_id,name,image_url,s3_key,status) VALUES ('av-ready',$1,'Dr','u','k','ready'),('av-wait',$1,'Dr2','u','k','processing')", [uid.id]);
+    // Resolve the owner from the token rather than ordering users by created_at:
+    // two guests created in the same millisecond make that ordering ambiguous.
+    const me = (await (await call("/api/v1/users/me", auth(token))).json()) as { id: string };
+    await db.query("INSERT INTO avatars (id,user_id,name,image_url,s3_key,status) VALUES ('av-ready',$1,'Dr','u','k','ready'),('av-wait',$1,'Dr2','u','k','processing')", [me.id]);
   });
   it("create session: 404 / 400 / 201 matches SessionResponse", async () => {
     expect((await call("/api/v1/sessions/create", json(token, { avatar_id: "nope" }))).status).toBe(404);
