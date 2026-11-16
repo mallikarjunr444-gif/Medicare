@@ -173,59 +173,61 @@ export function PhotorealisticDigitalHuman({
       // ─────────────────────────────────────────────────────────────
       const breathPhase = Math.sin(t * 1.46)
       // Base scale > 1 so head sway / breathing never exposes the edge of the frame.
-      sim.breathing = 1.025 + breathPhase * 0.006
+      sim.breathing = 1.05 + breathPhase * 0.006
 
       // ─────────────────────────────────────────────────────────────
       // 2. Conversational Head Kinematics & Posture by State
       // ─────────────────────────────────────────────────────────────
+      // Slow, incommensurate drifts so the motion never visibly loops.
+      const drift = (f1: number, f2: number) => Math.sin(t * f1) * 0.6 + Math.sin(t * f2 + 1.7) * 0.4
+      const open = sim.mouth.open
       switch (doctorState) {
         case 'listening':
-          // Attentive forward posture with micro-nods
-          sim.head.targetPitch = 2.2 + Math.sin(t * 2.2) * 0.9
-          sim.head.targetYaw = Math.sin(t * 0.8) * 0.6
-          sim.head.targetRoll = 0.4
-          sim.brows.lift = 0.08
+          // Attentive: head tilted slightly to one side, slow nods of understanding.
+          sim.head.targetPitch = 2.2 + Math.max(0, Math.sin(t * 0.9)) ** 6 * 3.2
+          sim.head.targetYaw = drift(0.31, 0.53) * 1.6
+          sim.head.targetRoll = 3.2 + drift(0.4, 0.7) * 0.9
+          sim.brows.lift = 0.1
           sim.brows.furrow = 0.0
           break
 
         case 'thinking':
-          // Contemplative upward-side glance
-          sim.head.targetPitch = -1.5
-          sim.head.targetYaw = 2.4 + Math.sin(t * 1.0) * 0.5
-          sim.head.targetRoll = -0.8
+          // Considering: eyes up, head tilted to the other side.
+          sim.head.targetPitch = -2.4 + Math.sin(t * 0.8) * 0.6
+          sim.head.targetYaw = 3.6 + Math.sin(t * 0.7) * 0.8
+          sim.head.targetRoll = -3.6 + Math.sin(t * 0.5) * 0.7
           sim.brows.lift = 0.0
-          sim.brows.furrow = 0.15
+          sim.brows.furrow = 0.18
           break
 
         case 'speaking':
-          // Small nods on emphasis plus a slow sway, so a talking head is never frozen.
-          sim.head.targetPitch = sim.mouth.open * 0.9 - 0.2
-          sim.head.targetYaw = Math.sin(t * 0.9) * 0.5
-          sim.head.targetRoll = Math.sin(t * 0.7) * 0.3
-          sim.brows.lift = 0
+          // Beats on emphasis (driven by mouth energy), plus a changing tilt like a person explaining.
+          sim.head.targetPitch = open * 3.4 - 0.6 + Math.sin(t * 1.3) * 0.5
+          sim.head.targetYaw = drift(0.45, 0.8) * 2.2
+          sim.head.targetRoll = Math.sin(t * 0.38) * 3.0 + (open - 0.3) * 1.2
+          sim.brows.lift = open * 0.12
           sim.brows.furrow = 0.0
           break
 
         case 'interrupted':
-          // Recoils attentively
-          sim.head.targetPitch = -0.5
+          sim.head.targetPitch = -1.2
           sim.head.targetYaw = 0
-          sim.head.targetRoll = 0
-          sim.brows.lift = 0.18
+          sim.head.targetRoll = 2.0
+          sim.brows.lift = 0.22
           break
 
         case 'idle':
         default:
-          sim.head.targetPitch = Math.sin(t * 0.6) * 0.5
-          sim.head.targetYaw = Math.cos(t * 0.5) * 0.4
-          sim.head.targetRoll = 0
+          sim.head.targetPitch = drift(0.35, 0.6) * 1.0
+          sim.head.targetYaw = drift(0.27, 0.44) * 1.4
+          sim.head.targetRoll = drift(0.22, 0.5) * 1.2
           sim.brows.lift = 0
           sim.brows.furrow = 0
           break
       }
 
       // Smooth lerp damping
-      const lerp = 0.08
+      const lerp = 0.06
       sim.head.pitch += (sim.head.targetPitch - sim.head.pitch) * lerp
       sim.head.yaw += (sim.head.targetYaw - sim.head.yaw) * lerp
       sim.head.roll += (sim.head.targetRoll - sim.head.roll) * lerp
@@ -233,7 +235,7 @@ export function PhotorealisticDigitalHuman({
       // Breathing + head motion are CSS on the wrapper, so the lip-sync video moves with them.
       const stage = stageRef.current
       if (stage) {
-        stage.style.transform = `translate3d(${sim.head.yaw * 3.5}px, ${sim.head.pitch * 3.0}px, 0) rotate(${sim.head.roll}deg) scale(${sim.breathing})`
+        stage.style.transform = `perspective(900px) translate3d(${sim.head.yaw * 4}px, ${sim.head.pitch * 3.5}px, 0) rotateY(${sim.head.yaw * 1.2}deg) rotateX(${-sim.head.pitch * 0.9}deg) rotate(${sim.head.roll}deg) scale(${sim.breathing})`
       }
 
       // The lip-sync video plays over the canvas and never blinks (only the jaw is regenerated).
