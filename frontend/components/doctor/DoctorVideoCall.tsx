@@ -430,6 +430,7 @@ export function DoctorVideoCall({
   const doctorBackend = useDoctorBackendSession(handleDoctorBackendEvent)
   const {
     sendText: sendTextToBackend,
+    sendFrame: sendFrameToBackend,
     interrupt: interruptBackend,
   } = doctorBackend
 
@@ -953,6 +954,7 @@ export function DoctorVideoCall({
                 isMicOn={isListeningSpeech}
                 onToggleCamera={() => setIsCameraOn((prev) => !prev)}
                 onToggleMic={toggleMicListening}
+                onFrame={sendFrameToBackend}
               />
             </div>
 
@@ -1017,7 +1019,7 @@ export function DoctorVideoCall({
                 onClick={() => setIsCameraOn(!isCameraOn)}
                 aria-label={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
                 aria-pressed={isCameraOn}
-                title={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
+                title={isCameraOn ? 'Turn camera off' : 'Turn camera on — the doctor can see you and check how you look. Pictures are not saved.'}
                 className="inline-flex h-11 items-center gap-2 rounded-xl border border-clinic-hairline bg-clinic-surface px-3 text-[13px] font-semibold text-clinic-ink transition hover:bg-clinic-porcelain focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-clinic-teal/25"
               >
                 {isCameraOn ? <Video size={17} className="text-clinic-teal" aria-hidden="true" /> : <VideoOff size={17} className="text-clinic-muted" aria-hidden="true" />}

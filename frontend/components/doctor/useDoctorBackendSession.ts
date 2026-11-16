@@ -127,6 +127,13 @@ export function useDoctorBackendSession(onMessage: (message: WsMessage) => void)
     return true
   }, [])
 
+  const sendFrame = useCallback((image: string) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify({ type: 'frame', image }))
+    return true
+  }, [])
+
   const interrupt = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'interrupt' }))
@@ -146,5 +153,5 @@ export function useDoctorBackendSession(onMessage: (message: WsMessage) => void)
 
   const getSessionId = useCallback(() => sessionIdRef.current, [])
 
-  return { status, getSessionId, connect, setLanguage, sendText, interrupt, disconnect }
+  return { status, getSessionId, connect, setLanguage, sendText, sendFrame, interrupt, disconnect }
 }

@@ -245,10 +245,54 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         void run(text, mine);
         return;
       }
+      case "frame": {
+        void observe(data.image);
+        return;
+      }
       case "set_voice":
         return;
     }
   });
+
+
+  // The doctor watches the patient's camera. A small frame is described by a free vision model; if something is
+  // notable the doctor asks about it, gently, like a clinician would. Observations are never stored or diagnosed.
+  let lastObserved = 0;
+  async function observe(image: unknown) {
+    const now = Date.now();
+    if (busy || !env.AI || typeof image !== "string" || now - lastObserved < 15_000) return;
+    const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(image);
+    if (!m || m[1].length > 200_000) return;
+    lastObserved = now;
+    busy = true;
+    const mine = { aborted: false };
+    try {
+      const bin = atob(m[1]);
+      const bytes = Array.from({ length: bin.length }, (_, i) => bin.charCodeAt(i));
+      const v: any = await env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
+        image: bytes,
+        max_tokens: 60,
+        prompt:
+          "USER: This is a still frame from a patient's video consultation. In one short sentence, describe only what a doctor would clearly notice: a face showing pain or distress, holding a body part, visible redness or swelling, pale or sweaty look, slumped posture, or coughing. Do not guess or diagnose. If nothing stands out, answer exactly NONE.\nASSISTANT:",
+      });
+      const seen = String(v?.description ?? v?.response ?? "").trim();
+      if (!seen || /^none\b/i.test(seen) || seen.length < 8) return;
+      const hist = (
+        await query(`SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10`, [sessionId])
+      ).reverse() as Chat[];
+      const lang = LANGS[language] ?? language;
+      const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-2 short sentences, no markdown.\nYou can see the patient on camera. A camera check noted (it may be wrong): "${seen}". Gently mention what you noticed and ask how they are feeling or if something hurts. Never state a diagnosis. Do not mention cameras or AI analysis.`;
+      const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist, { role: "user", content: "(The patient is quietly on camera.)" }], language, (t) => send({ type: "token", token: t }), mine);
+      const content = validateAiResponse(reply.trim());
+      if (!content) return;
+      send({ type: "message", role: "assistant", content });
+      await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [crypto.randomUUID(), sessionId, content]);
+    } catch (e) {
+      console.error("ws_observe_failed", String((e as Error).message).slice(0, 160)); // silent: observing is optional
+    } finally {
+      busy = false;
+    }
+  }
 
   async function transcribeThenRun(b64: string, mine: { aborted: boolean }) {
     try {

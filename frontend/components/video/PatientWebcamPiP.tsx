@@ -18,6 +18,8 @@ interface PatientWebcamPiPProps {
   isMicOn: boolean
   onToggleCamera: () => void
   onToggleMic: () => void
+  /** Called with a small JPEG data URL when the picture changes noticeably (the doctor watches for changes). */
+  onFrame?: (jpegDataUrl: string) => void
   className?: string
 }
 
@@ -26,6 +28,7 @@ export function PatientWebcamPiP({
   isMicOn,
   onToggleCamera,
   onToggleMic,
+  onFrame,
   className = '',
 }: PatientWebcamPiPProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -34,6 +37,48 @@ export function PatientWebcamPiP({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isMinimized, setIsMinimized] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  const onFrameRef = useRef(onFrame)
+  useEffect(() => {
+    onFrameRef.current = onFrame
+  }, [onFrame])
+
+  // The doctor watches for changes: a cheap 32x24 grayscale diff every 3 s decides whether a frame is worth sending.
+  useEffect(() => {
+    if (!isCameraOn || !onFrameRef.current) return
+    const small = document.createElement('canvas')
+    small.width = 32
+    small.height = 24
+    const big = document.createElement('canvas')
+    big.width = 320
+    big.height = 240
+    const sctx = small.getContext('2d', { willReadFrequently: true })
+    const bctx = big.getContext('2d')
+    if (!sctx || !bctx) return
+    let prev: Uint8ClampedArray | null = null
+    let lastSent = 0
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      const v = videoRef.current
+      if (!v || v.readyState < 2 || document.hidden) return
+      sctx.drawImage(v, 0, 0, 32, 24)
+      const px = sctx.getImageData(0, 0, 32, 24).data
+      const gray = new Uint8ClampedArray(32 * 24)
+      for (let i = 0; i < gray.length; i++) gray[i] = (px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2]) / 3
+      let diff = 0
+      if (prev) for (let i = 0; i < gray.length; i++) diff += Math.abs(gray[i] - prev[i])
+      diff /= gray.length
+      prev = gray
+      const now = Date.now()
+      const first = lastSent === 0 && now - startedAt > 6000
+      const changed = diff > 10 && now - lastSent > 25000
+      const heartbeat = lastSent > 0 && now - lastSent > 90000
+      if (!(first || changed || heartbeat)) return
+      bctx.drawImage(v, 0, 0, 320, 240)
+      lastSent = now
+      onFrameRef.current?.(big.toDataURL('image/jpeg', 0.6))
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [isCameraOn])
 
   useEffect(() => {
     let active = true
