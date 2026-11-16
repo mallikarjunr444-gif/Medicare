@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { toast } from 'react-hot-toast'
 import { mouthChannel, startLipSync, type LipSyncHandle } from '@/lib/visemes'
 import type { ConsultationLanguage, DoctorId, DoctorState } from '@/lib/doctorTypes'
 
@@ -18,6 +19,7 @@ export function useDoctorSpeech({
   onSubtitleUpdate,
 }: UseDoctorSpeechOptions) {
   const lipSyncRef = useRef<LipSyncHandle | null>(null)
+  const voiceHintShownRef = useRef(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
@@ -83,7 +85,9 @@ export function useDoctorSpeech({
       return langVoices[0]
     }
 
-    return voices.find((v) => v.lang.startsWith('en')) || voices[0]
+    // No voice for this language: return null so the engine picks one from utterance.lang
+    // (reading Kannada/Hindi text with an English voice is silent or garbled).
+    return null
   }, [language, doctorId])
 
   // Speak doctor response with watchdog & Chrome GC fix
@@ -155,7 +159,19 @@ export function useDoctorSpeech({
       }
 
       utterance.onend = handleEnd
-      utterance.onerror = handleEnd
+      utterance.onerror = (e) => {
+        const err = (e as SpeechSynthesisErrorEvent).error
+        if ((err === 'language-unavailable' || err === 'synthesis-unavailable') && !voiceHintShownRef.current) {
+          voiceHintShownRef.current = true
+          toast(
+            language === 'kn'
+              ? 'No Kannada voice found on this device. Install "Kannada" in Settings → Text-to-speech output to hear the doctor.'
+              : 'No voice found for this language on this device. Install it in Settings → Text-to-speech output to hear the doctor.',
+            { duration: 9000 },
+          )
+        }
+        handleEnd()
+      }
 
       // Safety watchdog: If utterance fails to emit onend (Chrome bug), release state automatically
       // Average 15 chars per second
