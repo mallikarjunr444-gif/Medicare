@@ -438,3 +438,21 @@ header.sticky { backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-fil
   header.sticky { border-bottom-color: rgba(0,0,0,.6); }
   .btn-secondary { border-color: currentColor; }
 }
+
+/* ── Liquid glass material ───────────────────────────────────────────────
+   Translucent, saturated, edge-lit. Chromium also refracts what is behind it. */
+.liquid-glass {
+  background: linear-gradient(135deg, rgba(255,255,255,.34), rgba(255,255,255,.12));
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  border: 1px solid rgba(255,255,255,.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -1px 0 rgba(255,255,255,.12), 0 8px 24px -10px rgba(0,0,0,.35);
+  color: #fff;
+}
+@supports (backdrop-filter: url(#x)) and (not (-webkit-hyphens: none)) and (not (-moz-appearance: none)) {
+  .liquid-glass { backdrop-filter: url(#liquid-glass-refract) blur(10px) saturate(180%); }
+}
+.liquid-glass-dark { background: linear-gradient(135deg, rgba(15,23,42,.55), rgba(15,23,42,.3)); }
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-glass, .liquid-glass-dark { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(15,23,42,.88); }
+}

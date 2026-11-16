@@ -940,7 +940,7 @@ export function DoctorVideoCall({
             <div
               role="status"
               aria-live="polite"
-              className="absolute left-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 py-1.5 pl-3 pr-3.5 text-[13px] font-semibold text-clinic-ink shadow-[0_1px_2px_rgba(15,47,54,.18)] backdrop-blur"
+              className="liquid-glass liquid-glass-dark absolute left-4 top-4 z-20 inline-flex items-center gap-2 rounded-full py-1.5 pl-3 pr-3.5 text-[13px] font-semibold"
             >
               <span className={`h-2.5 w-2.5 rounded-full ${turn.dot} ${turn.pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden="true" />
               {turn.chip}
