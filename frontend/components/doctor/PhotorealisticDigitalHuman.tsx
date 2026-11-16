@@ -52,6 +52,7 @@ export function PhotorealisticDigitalHuman({
   className = '',
 }: PhotorealisticDigitalHumanProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const lightRef = useRef<HTMLDivElement>(null)
   // Wraps canvas + speaking video so breathing and head sway move both together.
   const stageRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -142,6 +143,10 @@ export function PhotorealisticDigitalHuman({
     if (!canvas) return
     // alpha: true so, while the lip-sync video plays, the canvas can be transparent except for the eyelids.
     const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+    }
     if (!ctx) return
     // Keep one clock across effect re-runs (state/video changes) so blink timing is not reset.
     if (!simRef.current.startTime) simRef.current.startTime = performance.now()
@@ -238,6 +243,13 @@ export function PhotorealisticDigitalHuman({
         stage.style.transform = `perspective(900px) translate3d(${sim.head.yaw * 4}px, ${sim.head.pitch * 3.5}px, 0) rotateY(${sim.head.yaw * 1.2}deg) rotateX(${-sim.head.pitch * 0.9}deg) rotate(${sim.head.roll}deg) scale(${sim.breathing})`
       }
 
+      // A soft key light that slides across the face as the head turns and tilts, which sells the 3D depth.
+      const light = lightRef.current
+      if (light) {
+        light.style.backgroundPosition = `${50 + sim.head.yaw * 5}% ${40 - sim.head.pitch * 4}%`
+        light.style.opacity = String(0.55 + Math.abs(sim.head.roll) * 0.04)
+      }
+
       // The lip-sync video plays over the canvas and never blinks (only the jaw is regenerated).
       // While it plays, the canvas goes transparent except for the eyelids, drawn on top.
       const overlayEyes = doctorState === 'speaking' && videoReady && !!speakingVideoSrc
@@ -327,6 +339,13 @@ export function PhotorealisticDigitalHuman({
         // Above the speaking video only while it supplies the eyelids; otherwise it is the base layer.
         style={{ zIndex: doctorState === 'speaking' && videoReady ? 5 : 0 }}
         className="absolute inset-0 h-full w-full object-cover object-[center_25%] filter contrast-[1.03] brightness-[1.01]"
+      />
+
+      <div
+        ref={lightRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[6] mix-blend-soft-light"
+        style={{ backgroundImage: 'radial-gradient(ellipse 45% 55% at center, rgba(255,236,214,.55), rgba(255,236,214,0) 70%)', backgroundSize: '160% 160%', backgroundRepeat: 'no-repeat' }}
       />
 
       {speakingVideoSrc && doctorState === 'speaking' && (
