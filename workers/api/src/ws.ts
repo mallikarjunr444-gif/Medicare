@@ -114,6 +114,27 @@ export async function readSse(
   return full;
 }
 
+export type AiErrorKind = "quota" | "transient" | "config" | "other";
+
+export class AiError extends Error {
+  constructor(message: string, public status?: number, public retryAfterMs?: number) {
+    super(message);
+  }
+}
+
+/** Distinguishes exhausted quota (never retry) from temporary overload/network trouble (retry). */
+export function classifyAiError(e: unknown): AiErrorKind {
+  const msg = String((e as any)?.message ?? e).toLowerCase();
+  const status = (e as any)?.status as number | undefined;
+  if (msg.includes("ai_not_configured") || msg.includes("ai_binding_missing") || status === 401 || status === 403) return "config";
+  if (/daily|allocation|neurons|quota|insufficient|billing|exceeded your|4006/.test(msg)) return "quota";
+  if (status && [500, 502, 503, 504, 429].includes(status)) return "transient";
+  if (/capacity|overload|temporar|timeout|timed out|network|fetch failed|unavailable|try again|internal|3040|\b(429|500|502|503|504)\b/.test(msg)) return "transient";
+  return "other";
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /** Streams a Workers AI completion, calling onToken per piece. */
 async function streamWorkersAi(
   env: Env,
@@ -148,7 +169,10 @@ async function streamExternal(
     headers: { "content-type": "application/json", authorization: `Bearer ${env.AI_API_KEY}` },
     body: JSON.stringify({ model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
   });
-  if (!res.ok || !res.body) throw new Error(`external_ai_${res.status}`);
+  if (!res.ok || !res.body) {
+    const ra = Number(res.headers.get("retry-after"));
+    throw new AiError(`external_ai_${res.status}`, res.status, Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined);
+  }
   return readSse(res.body, onToken, signal);
 }
 
@@ -164,14 +188,21 @@ export async function streamAi(
   if (env.AI_API_KEY) order.push(streamExternal);
   if (env.AI) order.push(streamWorkersAi);
   if (!order.length) throw new Error("ai_not_configured");
+  const attempts = Math.max(1, Number(env.AI_MAX_ATTEMPTS) || 3);
   let lastErr: unknown;
   for (const provider of order) {
     let emitted = false;
-    try {
-      return await provider(env, messages, language, (t) => ((emitted = true), onToken(t)), signal);
-    } catch (e) {
-      lastErr = e;
-      if (emitted) throw e; // never switch providers mid-reply
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await provider(env, messages, language, (t) => ((emitted = true), onToken(t)), signal);
+      } catch (e) {
+        lastErr = e;
+        if (emitted || signal.aborted) throw e; // never retry/switch providers mid-reply
+        if (classifyAiError(e) !== "transient" || attempt === attempts) break;
+        const base = Math.min(4000, 400 * 2 ** (attempt - 1));
+        const wait = Math.min(8000, (e as AiError).retryAfterMs ?? base + Math.random() * base * 0.5);
+        await sleep(env.AI_RETRY_DELAY_MS === "0" ? 0 : wait);
+      }
     }
   }
   throw lastErr;
@@ -374,7 +405,20 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       ]);
     } catch (e) {
       console.error("ws_turn_failed", String((e as Error).message).slice(0, 200));
-      send({ type: "error", message: "The free AI service is busy or has used up its daily allowance. Please try again in a little while." });
+      const kind = classifyAiError(e);
+      send({
+        type: "error",
+        code: kind === "quota" ? "ai_quota" : kind === "transient" ? "ai_busy" : kind === "config" ? "ai_unconfigured" : "ai_error",
+        recoverable: kind !== "config",
+        message:
+          kind === "quota"
+            ? "The AI doctor has reached its free daily limit. Please try again tomorrow."
+            : kind === "transient"
+              ? "The AI doctor is temporarily busy. Your call is still connected; please say or send your message again in a moment."
+              : kind === "config"
+                ? "The AI doctor is not available right now."
+                : "Something went wrong while preparing the reply. Your call is still connected; please try again.",
+      });
     } finally {
       busy = false;
     }

@@ -19,6 +19,8 @@ export interface Env {
   AI_BASE_URL?: string;
   AI_MODEL_EXTERNAL?: string;
   AI_MODEL_LARGE_EXTERNAL?: string;
+  AI_MAX_ATTEMPTS?: string;
+  AI_RETRY_DELAY_MS?: string;
   AI_USER_HOURLY_CAP?: string;
   AI_DAILY_CAP?: string;
   // Bindings

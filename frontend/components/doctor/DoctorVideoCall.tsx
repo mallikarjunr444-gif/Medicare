@@ -407,7 +407,10 @@ export function DoctorVideoCall({
         doctorVideoActiveRef.current = false
         setDoctorVideoSrc(null)
         setIsRenderingLipSync(false)
-        setDoctorState('error')
+        // The call stays up: a failed AI turn must not end the session or the mic.
+        clearDoctorAudio()
+        setSubtitles('')
+        setDoctorState(event.recoverable === false ? 'error' : 'listening')
         resumeVoiceInput()
         toast.error(event.message, { id: 'consultation-backend-error' })
         break

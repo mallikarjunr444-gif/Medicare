@@ -61,7 +61,7 @@ export type WsMessage =
   | { type: 'video_chunk'; chunk_index: number; total_chunks: number; video_url: string; text: string }
   | { type: 'video_chunk_end'; sent_chunks: number }
   | { type: 'status'; message: string; stage?: string }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string; recoverable?: boolean }
   | { type: 'pong' }
   | { type: 'tts_fallback'; engine: string; voice_cloned: boolean; message: string }
   | { type: 'video_error'; message: string }

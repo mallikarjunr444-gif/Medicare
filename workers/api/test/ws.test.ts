@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normaliseLanguage, modelFor, retrieve, searchTerms, streamAi } from "../src/ws";
+import { normaliseLanguage, modelFor, retrieve, searchTerms, streamAi, AiError, classifyAiError } from "../src/ws";
 
 const sse = (lines: string[]) =>
   new ReadableStream<Uint8Array>({
@@ -94,15 +94,34 @@ describe("provider order", () => {
     const ai = { run: async () => sse(['data: {"response":"CF"}', "data: [DONE]"]) };
     try {
       globalThis.fetch = (async () => ok(["Gro", "q"])) as any;
-      expect(await streamAi({ AI_API_KEY: "k", AI: ai } as any, [], "en", () => {}, { aborted: false })).toBe("Groq");
+      expect(await streamAi({ AI_API_KEY: "k", AI: ai, AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, { aborted: false })).toBe("Groq");
       globalThis.fetch = (async () => new Response("rate limited", { status: 429 })) as any;
-      expect(await streamAi({ AI_API_KEY: "k", AI: ai } as any, [], "en", () => {}, { aborted: false })).toBe("CF");
-      await expect(streamAi({ AI_API_KEY: "k" } as any, [], "en", () => {}, { aborted: false })).rejects.toThrow("external_ai_429");
+      expect(await streamAi({ AI_API_KEY: "k", AI: ai, AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, { aborted: false })).toBe("CF");
+      await expect(streamAi({ AI_API_KEY: "k", AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, { aborted: false })).rejects.toThrow("external_ai_429");
     } finally {
       globalThis.fetch = orig;
     }
   });
   it("uses an OpenAI-compatible Workers AI-less setup and errors when nothing is configured", async () => {
     await expect(streamAi({} as any, [], "en", () => {}, { aborted: false })).rejects.toThrow("ai_not_configured");
+  });
+  it("retries temporary failures but never retries exhausted quota or mid-reply", async () => {
+    const mk = (errs: any[], tokens = ["ok"]) => {
+      let n = 0;
+      return { calls: () => n, ai: { run: async () => {
+        const e = errs[n++];
+        if (e) throw e;
+        return new Response(tokens.map((t) => `data: ${JSON.stringify({ response: t })}\n\n`).join("")).body;
+      } } };
+    };
+    const sig = { aborted: false };
+    const a = mk([new Error("3040: Capacity temporarily exceeded"), new Error("503 unavailable")]);
+    expect(await streamAi({ AI: a.ai, AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, sig)).toBe("ok");
+    expect(a.calls()).toBe(3);
+    const q = mk([new Error("4006: you have used up your daily free allocation of 10,000 neurons")]);
+    await expect(streamAi({ AI: q.ai, AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, sig)).rejects.toThrow("daily");
+    expect(q.calls()).toBe(1);
+    expect(classifyAiError(new AiError("x", 503))).toBe("transient");
+    expect(classifyAiError(new Error("ai_not_configured"))).toBe("config");
   });
 });
