@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import {
   CalendarDays,
+  Brain,
   HeartPulse,
   History,
   MoreHorizontal,
@@ -19,6 +20,7 @@ import { ScrollProgress } from '@/components/ui/scroll-progress'
 import { ClosingCta, DoctorTiles, Faq, FeatureTiles, Hero, HowItWorks, Safety, SiteFooter } from '@/components/site/HomeSections'
 import { CompareDoctors, HighlightChips, HighlightsGallery, LanguageViewer, LocalNav } from '@/components/site/ProductSections'
 import { PatientDashboard } from '@/components/patient/PatientDashboard'
+import { PsychologyConsultation } from '@/components/psychology/PsychologyConsultation'
 import { PatientNotesPanel } from '@/components/patient/PatientNotesPanel'
 import { AppointmentWorkspace } from '@/components/patient/AppointmentWorkspace'
 import { SpecialistBookingModal, type AppointmentRequestResult } from '@/components/doctor/SpecialistBookingModal'
@@ -55,11 +57,12 @@ function PanelLoader({ label }: Readonly<{ label: string }>) {
   )
 }
 
-type View = 'home' | 'patient' | 'consultation' | 'chat' | 'notes' | 'appointments' | 'history' | 'settings' | 'admin'
+type View = 'home' | 'patient' | 'consultation' | 'psychology' | 'chat' | 'notes' | 'appointments' | 'history' | 'settings' | 'admin'
 
 const navItems: { id: View; icon: typeof HeartPulse; label: string }[] = [
   { id: 'home', icon: HeartPulse, label: 'Home' },
   { id: 'consultation', icon: Stethoscope, label: 'Consultation' },
+  { id: 'psychology', icon: Brain, label: 'Psychology' },
   { id: 'notes', icon: NotebookPen, label: 'Notes' },
   { id: 'appointments', icon: CalendarDays, label: 'Appointments' },
   { id: 'history', icon: History, label: 'History' },
@@ -129,6 +132,8 @@ export default function Home() {
       )}
 
       <main id="main-content" className={view === 'consultation' ? 'min-h-[100dvh]' : view === 'home' ? 'min-h-[calc(100dvh-3rem)]' : 'min-h-[calc(100dvh-3rem)] bg-[#f5f5f7]'}>
+        {view === 'psychology' && <PsychologyConsultation onExit={() => navigate('home')} />}
+
         {view === 'consultation' && (
           <div className="animate-fade-in">
             <DoctorVideoCall
