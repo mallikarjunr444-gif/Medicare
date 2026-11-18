@@ -173,14 +173,27 @@ export function useDoctorSpeech({
         handleEnd()
       }
 
-      // Safety watchdog: If utterance fails to emit onend (Chrome bug), release state automatically
-      // Average 15 chars per second
-      const estimatedDurationMs = Math.max(2500, (text.length / 15) * 1000 + 1500)
-      watchdogTimerRef.current = setTimeout(() => {
-        if (synthRef.current?.speaking === false) {
+      // Watchdog: Chrome sometimes never fires onend (or stalls on long text). Poll until playback really stops,
+      // nudge a stalled engine, and force-release the speaking state after a hard cap so it can never stick.
+      const startedAt = Date.now()
+      const hardCapMs = Math.max(8000, (text.length / 8) * 1000 + 6000)
+      const tick = () => {
+        const synth = synthRef.current
+        const elapsed = Date.now() - startedAt
+        if (!synth || activeUtteranceRef.current !== utterance) return
+        if (elapsed > hardCapMs) {
+          synth.cancel()
           handleEnd()
+          return
         }
-      }, estimatedDurationMs)
+        if (!synth.speaking && !synth.pending && elapsed > 1500) {
+          handleEnd()
+          return
+        }
+        if (synth.speaking && synth.paused) synth.resume()
+        watchdogTimerRef.current = setTimeout(tick, 1000)
+      }
+      watchdogTimerRef.current = setTimeout(tick, 1500)
 
       synthRef.current.speak(utterance)
     },

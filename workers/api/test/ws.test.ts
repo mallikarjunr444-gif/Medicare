@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normaliseLanguage, modelFor, retrieve, searchTerms, streamAi, AiError, classifyAiError } from "../src/ws";
+import { normaliseLanguage, modelFor, modelChain, DEFAULT_MODEL, DEFAULT_MODEL_LARGE, isModelGone, retrieve, searchTerms, streamAi, AiError, classifyAiError } from "../src/ws";
 
 const sse = (lines: string[]) =>
   new ReadableStream<Uint8Array>({
@@ -38,7 +38,8 @@ describe("modelFor", () => {
   it("uses the larger model for Kannada and Hindi only", () => {
     expect(modelFor({} as any, "kn")).toContain("70b");
     expect(modelFor({} as any, "hi")).toContain("70b");
-    expect(modelFor({} as any, "en")).toContain("8b");
+    expect(modelFor({} as any, "en")).toBe(DEFAULT_MODEL);
+    expect(modelFor({} as any, "en")).not.toMatch(/llama-3\.1-8b/); // retired by Cloudflare (error 5028)
   });
 });
 
@@ -123,5 +124,54 @@ describe("provider order", () => {
     expect(q.calls()).toBe(1);
     expect(classifyAiError(new AiError("x", 503))).toBe("transient");
     expect(classifyAiError(new Error("ai_not_configured"))).toBe("config");
+  });
+});
+
+describe("retired model recovery (production outage: 5028 deprecated)", () => {
+  const dead = () => new Error("5028: @cf/meta/infire-llama-3.1-8b-instruct was deprecated on 2026-05-30.");
+  const stream = (t: string) => new Response(`data: ${JSON.stringify({ response: t })}\n\n`).body;
+  it("recognises deprecated/missing models as configuration errors, not quota or temporary", () => {
+    expect(isModelGone(dead())).toBe(true);
+    expect(classifyAiError(dead())).toBe("config");
+    expect(classifyAiError(new Error("5007: No such model"))).toBe("config");
+    expect(isModelGone(new Error("3040: Capacity temporarily exceeded"))).toBe(false);
+  });
+  it("tries the next Workers AI model when one is retired, and stops on other errors", async () => {
+    const seen: string[] = [];
+    const ai = { run: async (m: string) => { seen.push(m); if (seen.length === 1) throw dead(); return stream("hello"); } };
+    expect(await streamAi({ AI: ai } as any, [], "en", () => {}, { aborted: false })).toBe("hello");
+    expect(seen).toEqual([DEFAULT_MODEL, DEFAULT_MODEL_LARGE]);
+    expect(modelChain({} as any, "kn")[0]).toBe(DEFAULT_MODEL_LARGE);
+    const seen2: string[] = [];
+    const quota = { run: async (m: string) => { seen2.push(m); throw new Error("4006: daily allocation exceeded"); } };
+    await expect(streamAi({ AI: quota, AI_RETRY_DELAY_MS: "0" } as any, [], "en", () => {}, { aborted: false })).rejects.toThrow("daily");
+    expect(seen2.length).toBe(1);
+  });
+  it("gives up with a config error (not a fake reply) when every model is retired", async () => {
+    const ai = { run: async () => { throw dead(); } };
+    const err = await streamAi({ AI: ai } as any, [], "kn", () => {}, { aborted: false }).catch((e) => e);
+    expect(classifyAiError(err)).toBe("config");
+  });
+});
+
+describe("external provider status handling", () => {
+  const orig = globalThis.fetch;
+  const run = (status: number, headers: Record<string, string> = {}) => {
+    let n = 0;
+    globalThis.fetch = (async () => { n++; return new Response("x", { status, headers }); }) as any;
+    return { calls: () => n, go: () => streamAi({ AI_API_KEY: "k", AI_RETRY_DELAY_MS: "0", AI_MAX_ATTEMPTS: "3" } as any, [], "en", () => {}, { aborted: false }).catch((e) => e) };
+  };
+  it("retries 429/500/502/503/504 with backoff, but not 401/403/404", async () => {
+    try {
+      for (const st of [429, 500, 502, 503, 504]) { const r = run(st); const e = await r.go(); expect(classifyAiError(e)).toBe("transient"); expect(r.calls()).toBe(3); }
+      for (const st of [401, 403, 404]) { const r = run(st); const e = await r.go(); expect(classifyAiError(e)).toBe("config"); expect(r.calls()).toBe(1); }
+    } finally { globalThis.fetch = orig; }
+  });
+  it("reads Retry-After from a 429", async () => {
+    try {
+      const r = run(429, { "retry-after": "2" });
+      const e: any = await r.go();
+      expect(e.retryAfterMs).toBe(2000);
+    } finally { globalThis.fetch = orig; }
   });
 });

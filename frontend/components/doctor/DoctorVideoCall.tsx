@@ -152,6 +152,8 @@ export function DoctorVideoCall({
 
   // Speech input remains available while text and video are being prepared;
   // it pauses only while actual response audio or video is playing.
+  // A failed AI turn is shown as its own status. It never changes the call/connection state, so the doctor video keeps running.
+  const [aiNotice, setAiNotice] = useState<{ code: string; message: string } | null>(null)
   const handleSendMessageRef = useRef<(text?: string) => void>(() => {})
   const dispatchRecognizedSpeech = useCallback((text: string) => {
     handleSendMessageRef.current(text)
@@ -267,6 +269,7 @@ export function DoctorVideoCall({
   const handleDoctorBackendEvent = useCallback((event: WsMessage) => {
     switch (event.type) {
       case 'token':
+        setAiNotice(null)
         if (!audioRef.current && !doctorVideoActiveRef.current) setDoctorState('thinking')
         if (!responseAudioStartedRef.current) {
           setSubtitles((current) => appendLiveCaption(current, event.token))
@@ -402,15 +405,19 @@ export function DoctorVideoCall({
         resumeVoiceInput()
         break
       case 'error':
+        // The call stays up: a failed AI turn must not end the session, the video or the mic.
+        // No substitute doctor reply is generated; the patient is told plainly that the AI is unavailable.
         doctorVideoFailureRef.current = true
         doctorVideoQueueRef.current = []
         doctorVideoActiveRef.current = false
         setDoctorVideoSrc(null)
         setIsRenderingLipSync(false)
-        // The call stays up: a failed AI turn must not end the session or the mic.
         clearDoctorAudio()
         setSubtitles('')
-        setDoctorState(event.recoverable === false ? 'error' : 'listening')
+        streamedDoctorMessageIdRef.current = null
+        streamedDoctorTextRef.current = ''
+        setDoctorState('listening')
+        setAiNotice({ code: event.code ?? 'ai_error', message: event.message })
         resumeVoiceInput()
         toast.error(event.message, { id: 'consultation-backend-error' })
         break
@@ -803,6 +810,11 @@ export function DoctorVideoCall({
       case 'Error':
         return { chip: consultationStatus === 'Error' ? 'Something went wrong' : 'Disconnected', title: 'Connection lost', hint: 'Check your network, then reconnect.', dot: 'bg-clinic-brick', pulse: false }
       case 'Listening':
+      case 'Ready':
+        if (aiNotice) {
+          return { chip: 'AI doctor unavailable', title: 'AI doctor unavailable', hint: aiNotice.code === 'ai_busy' ? 'Temporarily busy. The call is still connected; say it again in a moment.' : aiNotice.code === 'ai_quota' ? 'The free daily limit is reached. Try again tomorrow. The call is still connected.' : 'The call is still connected, but the AI service is not answering right now.', dot: 'bg-[#c98a1d]', pulse: false }
+        }
+        if (consultationStatus === 'Ready') return { chip: 'Ready', title: 'Tap the microphone to speak', hint: 'Or type in the panel on the right.', dot: 'bg-slate-400', pulse: false }
         return { chip: 'Listening to you', title: 'Listening', hint: 'Speak naturally. Pause when you finish.', dot: 'bg-clinic-teal', pulse: true }
       default:
         return { chip: 'Ready', title: 'Tap the microphone to speak', hint: 'Or type in the panel on the right.', dot: 'bg-slate-400', pulse: false }

@@ -49,6 +49,8 @@ export function useConsultationSpeechRecognition(
   const finalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const finalPartsRef = useRef<string[]>([])
   const lastFinalPartRef = useRef('')
+  const restartAttemptsRef = useRef(0)
+  const lastErrorRef = useRef<string | null>(null)
 
   const [isSupported, setIsSupported] = useState(true)
   const [isEnabled, setIsEnabled] = useState(false)
@@ -65,9 +67,13 @@ export function useConsultationSpeechRecognition(
     if (!recognition || !enabledRef.current || pausedRef.current) return
     try {
       recognition.start()
-    } catch {
-      // SpeechRecognition can throw InvalidStateError while a stop is still settling.
-      // The onend handler below retries once the browser has released the session.
+    } catch (e) {
+      // InvalidStateError while a stop is still settling ("already started" is harmless). Retry shortly,
+      // otherwise the mic would stay dead until the user taps it.
+      if (!/already started/i.test(String((e as Error)?.message))) {
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
+        restartTimerRef.current = setTimeout(startRecognition, 500)
+      }
     }
   }, [])
 
@@ -139,6 +145,8 @@ export function useConsultationSpeechRecognition(
 
     recognition.onstart = () => {
       if (active) {
+        restartAttemptsRef.current = 0
+        lastErrorRef.current = null
         setIsListening(true)
         setError(null)
       }
@@ -146,6 +154,7 @@ export function useConsultationSpeechRecognition(
 
     recognition.onresult = (event) => {
       if (!active) return
+      restartAttemptsRef.current = 0
       let interim = ''
       const finalParts: string[] = []
 
@@ -180,6 +189,9 @@ export function useConsultationSpeechRecognition(
 
     recognition.onerror = (event) => {
       if (!active) return
+      lastErrorRef.current = event.error
+      // Chrome ends the session after silence (no-speech), network blips and aborts. These are recoverable:
+      // onend restarts with backoff, so the mic keeps listening without the user doing anything.
       if (event.error === 'no-speech' || event.error === 'network' || event.error === 'aborted') return
 
       const message = event.error === 'not-allowed' || event.error === 'service-not-allowed'
@@ -199,7 +211,10 @@ export function useConsultationSpeechRecognition(
       setIsListening(false)
       if (enabledRef.current && !pausedRef.current) {
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
-        restartTimerRef.current = setTimeout(startRecognition, 220)
+        // Backoff when Chrome keeps ending immediately (e.g. repeated no-speech / network), capped at 5 s.
+        const delay = Math.min(220 * 2 ** restartAttemptsRef.current, 5000)
+        restartAttemptsRef.current = Math.min(restartAttemptsRef.current + 1, 5)
+        restartTimerRef.current = setTimeout(startRecognition, delay)
       }
     }
 
@@ -225,6 +240,30 @@ export function useConsultationSpeechRecognition(
       if (recognitionRef.current === recognition) recognitionRef.current = null
     }
   }, [language, startRecognition])
+
+  // Microphone recovery: when a mic is plugged in / permission returns / the network comes back after the
+  // recogniser gave up, restart it instead of leaving voice input dead.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const recover = () => {
+      const recoverable = lastErrorRef.current === 'audio-capture' || lastErrorRef.current === 'network'
+      if (!recoverable || !recognitionRef.current) return
+      lastErrorRef.current = null
+      restartAttemptsRef.current = 0
+      enabledRef.current = true
+      pausedRef.current = false
+      setError(null)
+      setIsEnabled(true)
+      startRecognition()
+    }
+    const devices = navigator.mediaDevices
+    devices?.addEventListener?.('devicechange', recover)
+    window.addEventListener('online', recover)
+    return () => {
+      devices?.removeEventListener?.('devicechange', recover)
+      window.removeEventListener('online', recover)
+    }
+  }, [startRecognition])
 
   return {
     isSupported,

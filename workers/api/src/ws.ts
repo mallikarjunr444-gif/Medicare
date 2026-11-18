@@ -71,11 +71,24 @@ function tokenOf(chunk: any): string {
   return chunk?.choices?.[0]?.delta?.content ?? "";
 }
 
-/** Kannada/Hindi need a larger model; English uses the cheaper one to stretch the free allowance. */
+/**
+ * Workers AI models, newest-supported first. `@cf/meta/llama-3.1-8b-instruct` was retired by Cloudflare
+ * (error 5028 "deprecated"), which broke every reply. Defaults here must not carry a planned deprecation
+ * date in the Workers AI catalog. Kannada/Hindi use the larger model; English uses a cheaper one.
+ */
+export const DEFAULT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+export const DEFAULT_MODEL_LARGE = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
 export function modelFor(env: Env, language: string): string {
   return language === "kn" || language === "hi"
-    ? env.AI_MODEL_LARGE || "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-    : env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+    ? env.AI_MODEL_LARGE || DEFAULT_MODEL_LARGE
+    : env.AI_MODEL || DEFAULT_MODEL;
+}
+
+/** Primary model, then the other default as a same-provider fallback if Cloudflare retires the first. */
+export function modelChain(env: Env, language: string): string[] {
+  const primary = modelFor(env, language);
+  return [...new Set([primary, DEFAULT_MODEL_LARGE, DEFAULT_MODEL])];
 }
 
 /** Reads an SSE stream (Workers AI or OpenAI-style) and returns the full text. */
@@ -122,11 +135,18 @@ export class AiError extends Error {
   }
 }
 
+/** Workers AI: 5028 = model deprecated, 5007 = no such model. Retrying the same model can never help. */
+export function isModelGone(e: unknown): boolean {
+  const msg = String((e as any)?.message ?? e).toLowerCase();
+  return /\b(5028|5007)\b|was deprecated|no such model|model .* not found/.test(msg);
+}
+
 /** Distinguishes exhausted quota (never retry) from temporary overload/network trouble (retry). */
 export function classifyAiError(e: unknown): AiErrorKind {
   const msg = String((e as any)?.message ?? e).toLowerCase();
   const status = (e as any)?.status as number | undefined;
-  if (msg.includes("ai_not_configured") || msg.includes("ai_binding_missing") || status === 401 || status === 403) return "config";
+  if (isModelGone(e)) return "config";
+  if (msg.includes("ai_not_configured") || msg.includes("ai_binding_missing") || status === 401 || status === 403 || status === 404) return "config";
   if (/daily|allocation|neurons|quota|insufficient|billing|exceeded your|4006/.test(msg)) return "quota";
   if (status && [500, 502, 503, 504, 429].includes(status)) return "transient";
   if (/capacity|overload|temporar|timeout|timed out|network|fetch failed|unavailable|try again|internal|3040|\b(429|500|502|503|504)\b/.test(msg)) return "transient";
@@ -144,13 +164,18 @@ async function streamWorkersAi(
   signal: { aborted: boolean },
 ): Promise<string> {
   if (!env.AI) throw new Error("ai_binding_missing");
-  const out: any = await env.AI.run(modelFor(env, language), {
-    messages,
-    stream: true,
-    max_tokens: 320,
-    temperature: 0.6,
-  });
-  return readSse(out as ReadableStream<Uint8Array>, onToken, signal);
+  let lastErr: unknown;
+  for (const model of modelChain(env, language)) {
+    try {
+      const out: any = await env.AI.run(model, { messages, stream: true, max_tokens: 320, temperature: 0.6 });
+      return await readSse(out as ReadableStream<Uint8Array>, onToken, signal);
+    } catch (e) {
+      lastErr = e;
+      if (!isModelGone(e)) throw e;
+      console.error("ai_model_unavailable", model, String((e as Error).message).slice(0, 160));
+    }
+  }
+  throw lastErr;
 }
 
 /** Any OpenAI-compatible streaming endpoint (Groq, Gemini, OpenRouter…). */
@@ -197,6 +222,7 @@ export async function streamAi(
         return await provider(env, messages, language, (t) => ((emitted = true), onToken(t)), signal);
       } catch (e) {
         lastErr = e;
+        console.error("ai_provider_failed", provider === streamExternal ? "external" : "workers_ai", attempt, String((e as Error).message).slice(0, 160));
         if (emitted || signal.aborted) throw e; // never retry/switch providers mid-reply
         if (classifyAiError(e) !== "transient" || attempt === attempts) break;
         const base = Math.min(4000, 400 * 2 ** (attempt - 1));
@@ -368,7 +394,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         if (language === "en" || !env.AI) return text;
         // Knowledge base is English: get an English search phrase for Kannada/Hindi input.
         try {
-          const t: any = await env.AI.run(env.AI_MODEL || "@cf/meta/llama-3.1-8b-instruct", {
+          const t: any = await env.AI.run(modelFor(env, "en"), {
             messages: [{ role: "user", content: `Translate to English, output only the translation:\n${text}` }],
             max_tokens: 80,
           });
