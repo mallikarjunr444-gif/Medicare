@@ -15,6 +15,7 @@ import type { AppVars, Env, Query } from "./env";
 import { messages } from "./routes/messages";
 import { sessions } from "./routes/sessions";
 import { users } from "./routes/users";
+import { psychology } from "./routes/psychology";
 
 const HEALTH_TIMEOUT_MS = 3000;
 
@@ -102,6 +103,7 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
   app.route("/api/v1/users", users);
   app.route("/api/v1/sessions", sessions);
   app.route("/api/v1/messages", messages);
+  app.route("/api/v1/psych", psychology);
 
   app.notFound((c) => c.json({ detail: "Not Found" }, 404));
 

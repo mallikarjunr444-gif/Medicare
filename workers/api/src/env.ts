@@ -21,6 +21,8 @@ export interface Env {
   AI_MODEL_LARGE_EXTERNAL?: string;
   AI_MAX_ATTEMPTS?: string;
   AI_RETRY_DELAY_MS?: string;
+  // Comma-separated emails treated as psychologists (in addition to users.is_psychologist)
+  PSYCHOLOGIST_EMAILS?: string;
   // Server voice (see src/tts.ts)
   TTS_PROVIDER?: string;
   GEMINI_API_KEY?: string;
@@ -51,5 +53,6 @@ export interface DbUser {
   is_active: boolean;
   is_superuser: boolean;
   is_guest: boolean;
+  is_psychologist?: boolean;
   created_at: Date | string;
 }
