@@ -66,6 +66,8 @@ export function PhotorealisticDigitalHuman({
   const simRef = useRef({
     startTime: 0,
     lastFrameTime: 0,
+    lastTick: 0,
+    openEnv: 0,
     nextBlinkAt: 2.4,
     blinkStartedAt: -1,
     breathing: 0,
@@ -154,13 +156,14 @@ export function PhotorealisticDigitalHuman({
     const render = (now: number) => {
       animFrameRef.current = requestAnimationFrame(render)
 
-      // A still portrait needs only gentle motion; cap work to ~24fps for
-      // laptops without a discrete GPU instead of repainting at display rate.
-      if (now - simRef.current.lastFrameTime < 1000 / 24) return
-      simRef.current.lastFrameTime = now
-
       const t = (now - simRef.current.startTime) / 1000
       const sim = simRef.current
+      // Head/breathing motion is applied every display frame (a 24 fps transform looks like shaking).
+      // Only the heavier canvas repaint is capped to ~24 fps for laptops without a discrete GPU.
+      const dt = Math.min(0.1, Math.max(0.001, sim.lastTick ? (now - sim.lastTick) / 1000 : 1 / 60))
+      sim.lastTick = now
+      const repaint = now - sim.lastFrameTime >= 1000 / 24
+      if (repaint) sim.lastFrameTime = now
 
       if (t >= sim.nextBlinkAt) {
         sim.blinkStartedAt = t
@@ -185,7 +188,10 @@ export function PhotorealisticDigitalHuman({
       // ─────────────────────────────────────────────────────────────
       // Slow, incommensurate drifts so the motion never visibly loops.
       const drift = (f1: number, f2: number) => Math.sin(t * f1) * 0.6 + Math.sin(t * f2 + 1.7) * 0.4
-      const open = sim.mouth.open
+      // Syllable-rate mouth openings must not drive the head directly (that reads as shaking):
+      // use a slow envelope (~0.4 s) so the head only follows overall speaking energy.
+      sim.openEnv += (sim.mouth.open - sim.openEnv) * (1 - Math.exp(-dt * 2.5))
+      const open = sim.openEnv
       switch (doctorState) {
         case 'listening':
           // Attentive: head tilted slightly to one side, slow nods of understanding.
@@ -207,9 +213,9 @@ export function PhotorealisticDigitalHuman({
 
         case 'speaking':
           // Beats on emphasis (driven by mouth energy), plus a changing tilt like a person explaining.
-          sim.head.targetPitch = open * 3.4 - 0.6 + Math.sin(t * 1.3) * 0.5
-          sim.head.targetYaw = drift(0.45, 0.8) * 2.2
-          sim.head.targetRoll = Math.sin(t * 0.38) * 3.0 + (open - 0.3) * 1.2
+          sim.head.targetPitch = open * 1.8 - 0.3 + Math.sin(t * 1.3) * 0.4
+          sim.head.targetYaw = drift(0.45, 0.8) * 1.5
+          sim.head.targetRoll = Math.sin(t * 0.38) * 2.0 + (open - 0.3) * 0.5
           sim.brows.lift = open * 0.12
           sim.brows.furrow = 0.0
           break
@@ -232,7 +238,7 @@ export function PhotorealisticDigitalHuman({
       }
 
       // Smooth lerp damping
-      const lerp = 0.06
+      const lerp = 1 - Math.exp(-dt * 1.6) // frame-rate independent damping
       sim.head.pitch += (sim.head.targetPitch - sim.head.pitch) * lerp
       sim.head.yaw += (sim.head.targetYaw - sim.head.yaw) * lerp
       sim.head.roll += (sim.head.targetRoll - sim.head.roll) * lerp
@@ -240,7 +246,7 @@ export function PhotorealisticDigitalHuman({
       // Breathing + head motion are CSS on the wrapper, so the lip-sync video moves with them.
       const stage = stageRef.current
       if (stage) {
-        stage.style.transform = `perspective(900px) translate3d(${sim.head.yaw * 4}px, ${sim.head.pitch * 3.5}px, 0) rotateY(${sim.head.yaw * 1.2}deg) rotateX(${-sim.head.pitch * 0.9}deg) rotate(${sim.head.roll}deg) scale(${sim.breathing})`
+        stage.style.transform = `perspective(900px) translate3d(${(sim.head.yaw * 2.5).toFixed(2)}px, ${(sim.head.pitch * 2).toFixed(2)}px, 0) rotateY(${sim.head.yaw * 1.2}deg) rotateX(${-sim.head.pitch * 0.9}deg) rotate(${sim.head.roll}deg) scale(${sim.breathing})`
       }
 
       // A soft key light that slides across the face as the head turns and tilts, which sells the 3D depth.
@@ -249,6 +255,8 @@ export function PhotorealisticDigitalHuman({
         light.style.backgroundPosition = `${50 + sim.head.yaw * 5}% ${40 - sim.head.pitch * 4}%`
         light.style.opacity = String(0.55 + Math.abs(sim.head.roll) * 0.04)
       }
+
+      if (!repaint) return
 
       // The lip-sync video plays over the canvas and never blinks (only the jaw is regenerated).
       // While it plays, the canvas goes transparent except for the eyelids, drawn on top.

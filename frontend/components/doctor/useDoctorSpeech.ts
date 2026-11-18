@@ -40,7 +40,26 @@ export function useDoctorSpeech({
         window.speechSynthesis.getVoices()
       }
     }
+    // Browsers only allow speech after a user gesture. Prime the engine on the first tap/key/click so the
+    // doctor's reply (which arrives later from the network) is allowed to speak.
+    const unlock = () => {
+      try {
+        const synth = window.speechSynthesis
+        if (!synth || synth.speaking) return
+        const primer = new SpeechSynthesisUtterance(' ')
+        primer.volume = 0
+        synth.speak(primer)
+      } catch {
+        /* speech unavailable */
+      }
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
     return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
       if (synthRef.current) {
         synthRef.current.cancel()
       }
@@ -68,21 +87,21 @@ export function useDoctorSpeech({
       en: 'en',
     }
     const prefix = langMap[language] || 'en'
-    const langVoices = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix))
+    const tag = ({ kn: 'kn-in', hi: 'hi-in', en: 'en-in' } as Record<string, string>)[language] || 'en-in'
+    const langVoices = voices
+      .filter((v) => v.lang.toLowerCase().replace('_', '-').startsWith(prefix))
+      // Best first: exact regional tag, then Google/online voices (usually clearer than OS defaults).
+      .sort((x, y) => {
+        const score = (v: SpeechSynthesisVoice) =>
+          (v.lang.toLowerCase().replace('_', '-') === tag ? 4 : 0) + (/google|natural|neural/i.test(v.name) ? 2 : 0) + (v.localService ? 0 : 1)
+        return score(y) - score(x)
+      })
 
     if (langVoices.length > 0) {
-      if (doctorId === 'dr_ananya') {
-        const femaleVoice = langVoices.find((v) =>
-          /female|woman|girl|samantha|zira|swara|kalpana|veena|geeta|leela/i.test(v.name)
-        )
-        if (femaleVoice) return femaleVoice
-      } else {
-        const maleVoice = langVoices.find((v) =>
-          /male|man|boy|david|george|ravi|madhav|rishi|karthik|suresh/i.test(v.name)
-        )
-        if (maleVoice) return maleVoice
-      }
-      return langVoices[0]
+      const wanted = doctorId === 'dr_ananya'
+        ? /female|woman|girl|samantha|zira|swara|kalpana|veena|geeta|leela|neerja/i
+        : /(?<!fe)male|man|boy|david|george|ravi|madhav|rishi|karthik|suresh|prabhat|hemant/i
+      return langVoices.find((v) => wanted.test(v.name)) ?? langVoices[0]
     }
 
     // No voice for this language: return null so the engine picks one from utterance.lang
@@ -113,6 +132,15 @@ export function useDoctorSpeech({
       activeUtteranceRef.current = utterance
 
       const voice = getDoctorVoice()
+      if (!voice && language !== 'en' && !voiceHintShownRef.current && synthRef.current.getVoices().length > 0) {
+        voiceHintShownRef.current = true
+        toast(
+          language === 'kn'
+            ? 'This device has no Kannada voice, so you will see captions and lip movement but hear no sound. Install "Kannada" text-to-speech (Android: Settings → Text-to-speech output) or use Hindi/English.'
+            : 'This device has no Hindi voice, so you will see captions and lip movement but hear no sound. Install a Hindi text-to-speech voice in your device settings.',
+          { duration: 9000 },
+        )
+      }
       const bcp47Map: Record<ConsultationLanguage, string> = {
         kn: 'kn-IN',
         hi: 'hi-IN',
