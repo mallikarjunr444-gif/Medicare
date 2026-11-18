@@ -21,6 +21,12 @@ export interface Env {
   AI_MODEL_LARGE_EXTERNAL?: string;
   AI_MAX_ATTEMPTS?: string;
   AI_RETRY_DELAY_MS?: string;
+  // Server voice (see src/tts.ts)
+  TTS_PROVIDER?: string;
+  GEMINI_API_KEY?: string;
+  TTS_MODEL?: string;
+  TTS_VOICE_MALE?: string;
+  TTS_VOICE_FEMALE?: string;
   AI_USER_HOURLY_CAP?: string;
   AI_DAILY_CAP?: string;
   // Bindings

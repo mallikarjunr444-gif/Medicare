@@ -1,6 +1,7 @@
 import { subjectFromToken } from "./auth";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
+import { synthesizeSpeech } from "./tts";
 import type { Env, Query } from "./env";
 
 const LANGS: Record<string, string> = { kn: "Kannada (ಕನ್ನಡ script)", en: "English", hi: "Hindi (देवनागरी script)" };
@@ -251,6 +252,19 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
     }
   };
 
+  /** Sends the doctor's voice (if a server voice is available) before the final message, so the browser never speaks twice. */
+  async function sendVoice(content: string, mine: { aborted: boolean }) {
+    try {
+      const parts = await synthesizeSpeech(env, content, language, doctorId);
+      if (mine.aborted || !parts.length) return;
+      parts.forEach((p, i) => send({ type: "audio_chunk", chunk_index: i, mime_type: p.mime, text: p.text, audio_data: p.data }));
+      send({ type: "audio_stream_end" });
+    } catch (e) {
+      console.error("tts_failed", String((e as Error).message).slice(0, 120)); // device voice speaks instead
+      send({ type: "tts_fallback", engine: "device", voice_cloned: false, message: "The server voice is unavailable, so your device's voice is being used." });
+    }
+  }
+
   const query = makeQuery(env);
   const uid = token ? await subjectFromToken(env, token) : null;
   const session = uid
@@ -342,6 +356,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist, { role: "user", content: "(The patient is quietly on camera.)" }], language, (t) => send({ type: "token", token: t }), mine);
       const content = validateAiResponse(reply.trim());
       if (!content) return;
+      await sendVoice(content, mine);
       send({ type: "message", role: "assistant", content });
       await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [crypto.randomUUID(), sessionId, content]);
     } catch (e) {
@@ -413,6 +428,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [
           crypto.randomUUID(), sessionId, reply,
         ]);
+        await sendVoice(reply, mine);
         send({ type: "message", role: "assistant", content: reply, triage: 4, is_emergency: true });
         return;
       }
@@ -422,7 +438,9 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist], language, (t) => send({ type: "token", token: t }), mine);
       if (mine.aborted) return;
       const content = validateAiResponse(reply.trim()) || "I'm here. Could you tell me a little more?";
-      // Deliver first; persisting is not on the user's critical path.
+      // Voice first (so the browser does not also speak), then the final message; persisting is off the critical path.
+      await sendVoice(content, mine);
+      if (mine.aborted) return;
       send({ type: "message", role: "assistant", content });
       await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [
         crypto.randomUUID(),

@@ -175,3 +175,74 @@ describe("external provider status handling", () => {
     } finally { globalThis.fetch = orig; }
   });
 });
+
+import { splitForSpeech, pcmBase64ToWavBase64, ttsProvider, synthesizeSpeech } from "../src/tts";
+
+describe("server voice (kn / hi / en)", () => {
+  const orig = globalThis.fetch;
+  const mp3 = () => new Response(new Uint8Array(400).fill(7), { status: 200 });
+  it("splits replies into short sentence chunks in every script", () => {
+    expect(splitForSpeech("Hello there. How are you feeling today?")).toEqual(["Hello there. How are you feeling today?"]);
+    const kn = splitForSpeech("ನಮಸ್ಕಾರ. ನಿಮಗೆ ತಲೆನೋವು ಯಾವಾಗಿನಿಂದ ಇದೆ? " + "ಇನ್ನಷ್ಟು ಹೇಳಿ ".repeat(30));
+    expect(kn.length).toBeGreaterThan(1);
+    expect(kn.every((c) => c.length <= 170)).toBe(true);
+    expect(splitForSpeech("नमस्ते। आपको कब से सिर दर्द है।").join(" ")).toContain("सिर दर्द");
+    expect(splitForSpeech("   ")).toEqual([]);
+  });
+  it("wraps PCM into a valid WAV without decoding it", () => {
+    const pcm = btoa(String.fromCharCode(...new Uint8Array(100).fill(1)));
+    const wav = Uint8Array.from(atob(pcmBase64ToWavBase64(pcm, 24000)), (c) => c.charCodeAt(0));
+    const dv = new DataView(wav.buffer);
+    expect(String.fromCharCode(...wav.slice(0, 4))).toBe("RIFF");
+    expect(String.fromCharCode(...wav.slice(8, 12))).toBe("WAVE");
+    expect(dv.getUint32(24, true)).toBe(24000);
+    expect(String.fromCharCode(...wav.slice(46, 50))).toBe("data");
+    expect(dv.getUint32(50, true)).toBe(100);
+    expect(wav.length).toBe(54 + 100);
+  });
+  it("picks the provider: Gemini when keyed, keyless Google otherwise, off on request", () => {
+    expect(ttsProvider({ GEMINI_API_KEY: "k" })).toBe("gemini");
+    expect(ttsProvider({})).toBe("google_translate");
+    expect(ttsProvider({ TTS_PROVIDER: "off", GEMINI_API_KEY: "k" })).toBe("off");
+    expect(ttsProvider({ TTS_PROVIDER: "gemini" })).toBe("off");
+  });
+  it("requests the right language and returns ordered audio parts (keyless)", async () => {
+    const urls: string[] = [];
+    try {
+      globalThis.fetch = (async (u: any) => { urls.push(String(u)); return mp3(); }) as any;
+      for (const [lang, tl, text] of [["kn", "kn", "ನಮಸ್ಕಾರ. ತಲೆನೋವು ಇದೆಯೇ?"], ["hi", "hi", "नमस्ते। सिर दर्द है?"], ["en", "en", "Hello. Any pain?"]] as const) {
+        urls.length = 0;
+        const parts = await synthesizeSpeech({} as any, text, lang, "dr_arjun");
+        expect(parts.length).toBeGreaterThan(0);
+        expect(parts[0].mime).toBe("audio/mpeg");
+        expect(urls[0]).toContain(`tl=${tl}`);
+      }
+    } finally { globalThis.fetch = orig; }
+  });
+  it("uses Gemini with a different voice per doctor and sends the key in a header, not the URL", async () => {
+    let seen: any;
+    try {
+      globalThis.fetch = (async (u: any, init: any) => {
+        seen = { u: String(u), init };
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/L16;codec=pcm;rate=24000", data: btoa("abcd".repeat(50)) } }] } }] }));
+      }) as any;
+      const env: any = { GEMINI_API_KEY: "SECRET" };
+      const parts = await synthesizeSpeech(env, "ನಮಸ್ಕಾರ", "kn", "dr_ananya");
+      expect(parts[0].mime).toBe("audio/wav");
+      expect(seen.u).not.toContain("SECRET");
+      expect(seen.init.headers["x-goog-api-key"]).toBe("SECRET");
+      expect(JSON.parse(seen.init.body).generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Kore");
+      await synthesizeSpeech(env, "hello", "en", "dr_arjun");
+      expect(JSON.parse(seen.init.body).generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Charon");
+    } finally { globalThis.fetch = orig; }
+  });
+  it("throws on provider failure or timeout so the browser voice can take over", async () => {
+    try {
+      globalThis.fetch = (async () => new Response("no", { status: 429 })) as any;
+      await expect(synthesizeSpeech({} as any, "hello", "en", "dr_arjun")).rejects.toThrow("tts_google_429");
+      globalThis.fetch = (() => new Promise(() => {})) as any;
+      await expect(synthesizeSpeech({} as any, "hello", "en", "dr_arjun", 20)).rejects.toThrow("tts_timeout");
+      expect(await synthesizeSpeech({ TTS_PROVIDER: "off" } as any, "hello", "en", "dr_arjun")).toEqual([]);
+    } finally { globalThis.fetch = orig; }
+  });
+});

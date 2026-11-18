@@ -32,3 +32,18 @@ The provider is **Cloudflare Workers AI** (binding `AI`), plus an optional OpenA
 | `AI_MAX_ATTEMPTS` | Attempts per provider for temporary errors (default 3) |
 | `AI_RETRY_DELAY_MS` | Set `0` to disable backoff sleeps (tests) |
 | `AI_USER_HOURLY_CAP` / `AI_DAILY_CAP` | Optional usage caps |
+
+## Server voice (Kannada / Hindi / English)
+`workers/api/src/tts.ts` synthesises each reply and streams it as `audio_chunk` events *before* the final `message`, so the
+browser plays the server audio (lips follow the real audio via the Web Audio analyser) and does not also speak with its own voice.
+If synthesis fails or takes over 7 s, the browser's own voice is used and a single notice is shown.
+
+| Variable | Purpose |
+|---|---|
+| `TTS_PROVIDER` | `auto` (default), `gemini`, `google_translate`, `off` |
+| `GEMINI_API_KEY` (secret) | Free key from aistudio.google.com/apikey. Official API, two doctor voices (Charon / Kore). Enables `gemini` in `auto` |
+| `TTS_MODEL` | Default `gemini-2.5-flash-preview-tts` |
+| `TTS_VOICE_MALE` / `TTS_VOICE_FEMALE` | Default `Charon` / `Kore` |
+
+Without a Gemini key, `auto` uses the keyless Google Translate speech endpoint. It is **unofficial**, may be rate-limited or blocked,
+and has a single voice. Set `GEMINI_API_KEY` for the supported path.

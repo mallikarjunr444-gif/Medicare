@@ -335,6 +335,8 @@ export function DoctorVideoCall({
         break
       }
       case 'audio_stream_end':
+        // No video renderer is attached on free hosting: the audio itself drives the lips (Web Audio analyser).
+        if (!doctorVideoActiveRef.current) setIsRenderingLipSync(false)
         audioStreamEndedRef.current = true
         startNextAudioRef.current()
         break
@@ -422,7 +424,7 @@ export function DoctorVideoCall({
         toast.error(event.message, { id: 'consultation-backend-error' })
         break
       case 'tts_fallback':
-        toast(event.message, { icon: '⚠️', duration: 5000 })
+        toast(event.message, { icon: '⚠️', duration: 5000, id: 'tts-fallback' })
         break
       case 'status':
         if (event.stage === 'animation' && !doctorVideoActiveRef.current) {
