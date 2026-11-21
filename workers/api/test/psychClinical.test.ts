@@ -21,6 +21,20 @@ describe("task summaries are computed from raw trials", () => {
     expect(summariseTask("reaction", { trials: trials.map(() => ({ rt_ms: -5 })) })).toBe("invalid reaction time");
     expect(summariseTask("reaction", { trials: trials.map(() => ({ rt_ms: 50 })) })).toBe("no valid trials");
   });
+  it("Stroop correctness and n-back targets are decided server-side", () => {
+    const mk = (n: number, f: (i: number) => any) => ({ trials: Array.from({ length: n }, (_, i) => f(i)) });
+    const s: any = summariseTask("stroop", mk(24, (i) => i % 2 ? { word: "red", color: "red", key: "R", rt_ms: 500 } : { word: "red", color: "blue", key: "b", rt_ms: 650 }));
+    expect(s).toMatchObject({ errors: 0, accuracy_pct: 100, congruent_median_ms: 500, incongruent_median_ms: 650, interference_ms: 150 });
+    const wrong: any = summariseTask("stroop", mk(24, (i) => i % 2 ? { word: "red", color: "red", key: "r", rt_ms: 500 } : { word: "red", color: "blue", key: "r", rt_ms: 650 })); // answered the WORD
+    expect(wrong).toBe("not enough correct trials");
+    expect(summariseTask("stroop", mk(24, () => ({ word: "pink", color: "red", key: "r", rt_ms: 1 })))).toBe("invalid Stroop trial");
+    const seq = "ABBCCDEEFG".repeat(3).split("");
+    const n: any = summariseTask("nback", mk(30, (i) => ({ letter: seq[i], pressed: seq[i] === seq[i - 1] })));
+    expect(n).toMatchObject({ misses: 0, false_alarms: 0, hit_rate_pct: 100 });
+    const lazy: any = summariseTask("nback", mk(30, (i) => ({ letter: seq[i], pressed: false })));
+    expect(lazy.hits).toBe(0); expect(lazy.misses).toBe(lazy.targets); // a client cannot relabel targets
+    expect(summariseTask("nback", mk(30, () => ({ letter: "a", pressed: true })))).toBe("invalid n-back trial");
+  });
   it("digit span decides correctness itself", () => {
     expect(summariseTask("digitspan", { trials: [{ digits: "123", response: "1 2 3" }, { digits: "4821", response: "4821" }, { digits: "73920", response: "73921" }] }))
       .toMatchObject({ correct_trials: 2, longest_span: 4 });
@@ -121,6 +135,30 @@ describe("stages 7-15", () => {
     expect((await call(`/consultations/${cid}/external`, req(psy, "POST", { ...body, scores: [] }))).status).toBe(422);
     expect((await call(`/consultations/${cid}/external`, req(psy, "POST", body))).status).toBe(201);
     expect((await db.query("SELECT count(*)::int n FROM psych_responses")).rows[0]).toMatchObject({ n: 0 }); // not mixed with screening data
+  });
+
+  it("clinician-built questionnaires: patient sees questions only once started; answers are validated; never scored", async () => {
+    const spec = { title: "Sleep diary", intro: "Last week", options: ["Never", "Sometimes", "Often"], items: ["I fall asleep easily", "I wake at night"] };
+    expect((await call(`/consultations/${cid}/forms`, req(pat, "POST", spec))).status).toBe(403);
+    expect((await call(`/consultations/${cid}/forms`, req(psy2, "POST", spec))).status).toBe(404);
+    expect((await call(`/consultations/${cid}/forms`, req(psy, "POST", { ...spec, options: ["only one"] }))).status).toBe(422);
+    expect((await call(`/consultations/${cid}/forms`, req(psy, "POST", { ...spec, items: [] }))).status).toBe(422);
+    const { id: fid } = await json(await call(`/consultations/${cid}/forms`, req(psy, "POST", spec)));
+    let mine = await json(await call(`/consultations/${cid}/forms`, req(pat)));
+    expect(mine[0]).toMatchObject({ title: "Sleep diary", status: "assigned" }); expect(mine[0]).not.toHaveProperty("items");
+    expect((await call(`/forms/${fid}/submit`, req(pat, "POST", { answers: { 0: 1, 1: 1 } }))).status).toBe(409);
+    expect((await call(`/forms/${fid}/start`, req(pat, "POST"))).status).toBe(403);
+    expect((await call(`/forms/${fid}/start`, req(psy, "POST"))).status).toBe(200);
+    mine = await json(await call(`/consultations/${cid}/forms`, req(pat)));
+    expect(mine[0].items).toHaveLength(2); expect(mine[0]).not.toHaveProperty("answers");
+    expect((await call(`/forms/${fid}/submit`, req(psy, "POST", { answers: { 0: 1, 1: 1 } }))).status).toBe(403);
+    expect((await call(`/forms/${fid}/submit`, req(pat, "POST", { answers: { 0: 1 } }))).status).toBe(422);
+    expect((await call(`/forms/${fid}/submit`, req(pat, "POST", { answers: { 0: 1, 1: 3 } }))).status).toBe(422); // out of range
+    expect((await call(`/forms/${fid}/submit`, req(pat, "POST", { answers: { 0: 2, 1: 1 } }))).status).toBe(200);
+    expect((await call(`/forms/${fid}/submit`, req(pat, "POST", { answers: { 0: 0, 1: 0 } }))).status).toBe(409);
+    const theirs = await json(await call(`/consultations/${cid}/forms`, req(psy)));
+    expect(theirs[0].answers).toEqual({ "0": 2, "1": 1 });
+    expect(JSON.stringify(theirs[0])).not.toMatch(/score|severity/i);
   });
 
   it("psychologist-only areas are closed to patients and to other psychologists", async () => {

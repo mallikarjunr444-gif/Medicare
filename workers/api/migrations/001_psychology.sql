@@ -159,3 +159,17 @@ CREATE TABLE IF NOT EXISTS psych_reports (
   approved_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS psych_forms (
+  id varchar PRIMARY KEY,
+  consultation_id varchar NOT NULL REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  title varchar NOT NULL,
+  intro text,
+  options jsonb NOT NULL,
+  items jsonb NOT NULL,
+  status varchar NOT NULL DEFAULT 'assigned',
+  answers jsonb,
+  created_by varchar NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);

@@ -46,9 +46,10 @@ export async function collect(c: C, id: string) {
   const external = await q("SELECT id, instrument, to_char(administered_on,'YYYY-MM-DD') AS administered_on, administered_by, authorization_ref, scores, comments FROM psych_external_results WHERE consultation_id=$1 ORDER BY created_at", [id]);
   const interviewRow = (await q("SELECT data FROM psych_interview WHERE consultation_id=$1", [id]))[0];
   const notes = await q("SELECT id, kind, body, created_at, updated_at FROM psych_notes WHERE consultation_id=$1 ORDER BY created_at", [id]);
+  const forms = await q("SELECT id, title, options, items, status, answers FROM psych_forms WHERE consultation_id=$1 ORDER BY created_at", [id]);
   const alerts = await q("SELECT id, kind, message, created_at, acknowledged_at FROM psych_alerts WHERE consultation_id=$1 ORDER BY created_at", [id]);
   const consents = await q("SELECT kind, granted FROM psych_consents WHERE consultation_id=$1", [id]);
-  return { cons, intake, assigns, resp, observers, tasks, external, interview: interviewRow?.data ?? {}, notes, alerts, consents };
+  return { cons, intake, assigns, resp, observers, tasks, external, interview: interviewRow?.data ?? {}, notes, alerts, consents, forms };
 }
 
 const clinical = new Hono<{ Bindings: Env; Variables: AppVars }>();
@@ -118,6 +119,59 @@ clinical.post("/tasks/:tid/submit", async (c) => {
   const r = await c.var.query("UPDATE psych_task_runs SET status='completed', result=$1::jsonb, completed_at=now() WHERE id=$2 AND status='active' RETURNING id", [JSON.stringify({ summary, trials: (b as any).trials }), t.id]);
   if (!r.length) fail(409, "This task was already submitted");
   await audit(c, t.consultation_id, "task_submitted", { task_id: t.id });
+  return c.json({ status: "completed" });
+});
+
+
+// ---------- custom questionnaires (built-in replacement for external survey servers) ----------
+// Unscored on purpose: a clinician-written form is not a validated instrument, so no score or severity is ever computed.
+clinical.post("/consultations/:id/forms", async (c) => {
+  const row = await psychologistOf(c, c.req.param("id"));
+  if (!(await consented(c, row.id, ["assessment", "data_processing"]))) fail(409, "The patient has not given assessment and data-processing consent.");
+  const b = await readJson(c.req.raw);
+  const title = text(b.title, 120, "title", true), intro = text(b.intro, 1000, "intro");
+  const options = Array.isArray(b.options) ? b.options.map((o: unknown, i: number) => text(o, 80, `options.${i}`, true)) : [];
+  const items = Array.isArray(b.items) ? b.items.map((o: unknown, i: number) => text(o, 400, `items.${i}`, true)) : [];
+  if (options.length < 2 || options.length > 7) validationError([{ loc: ["body", "options"], msg: "Provide 2 to 7 answer options", type: "value_error" }]);
+  if (items.length < 1 || items.length > 60) validationError([{ loc: ["body", "items"], msg: "Provide 1 to 60 questions", type: "value_error" }]);
+  const fid = crypto.randomUUID();
+  await c.var.query("INSERT INTO psych_forms (id, consultation_id, title, intro, options, items, created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",
+    [fid, row.id, title, intro || null, JSON.stringify(options), JSON.stringify(items), c.var.user!.id]);
+  await audit(c, row.id, "form_assigned", { form_id: fid });
+  return c.json({ id: fid }, 201);
+});
+clinical.get("/consultations/:id/forms", async (c) => {
+  const { row, role } = await loadConsultation(c, c.req.param("id"));
+  const rows = await c.var.query("SELECT * FROM psych_forms WHERE consultation_id=$1 ORDER BY created_at", [row.id]);
+  return c.json(rows.map((f: any) => role === "psychologist"
+    ? { id: f.id, title: f.title, intro: f.intro, options: f.options, items: f.items, status: f.status, answers: f.answers, completed_at: iso(f.completed_at) }
+    : { id: f.id, title: f.title, status: f.status, ...(f.status === "active" ? { intro: f.intro, options: f.options, items: f.items } : {}) })); // patients only see questions once started
+});
+clinical.post("/forms/:fid/start", async (c) => {
+  const f = (await c.var.query("SELECT * FROM psych_forms WHERE id=$1", [c.req.param("fid")]))[0];
+  if (!f) fail(404, "Questionnaire not found");
+  await psychologistOf(c, f.consultation_id);
+  const r = await c.var.query("UPDATE psych_forms SET status='active' WHERE id=$1 AND status='assigned' RETURNING id", [f.id]);
+  if (!r.length) fail(409, "Questionnaire cannot be started");
+  await audit(c, f.consultation_id, "form_started", { form_id: f.id });
+  return c.json({ ok: true });
+});
+clinical.post("/forms/:fid/submit", async (c) => {
+  const f = (await c.var.query("SELECT * FROM psych_forms WHERE id=$1", [c.req.param("fid")]))[0];
+  if (!f) fail(404, "Questionnaire not found");
+  const { role } = await loadConsultation(c, f.consultation_id);
+  if (role !== "patient") fail(403, "Only the patient can answer");
+  if (f.status !== "active") fail(409, "This questionnaire is not active");
+  const b = await readJson(c.req.raw); const a = b.answers as Record<string, unknown>;
+  const answers: Record<string, number> = {};
+  for (let i = 0; i < f.items.length; i++) {
+    const v = a?.[String(i)];
+    if (!Number.isInteger(v) || (v as number) < 0 || (v as number) >= f.options.length) validationError([{ loc: ["body", "answers", i], msg: `Question ${i + 1} needs an answer`, type: "value_error" }]);
+    answers[String(i)] = v as number;
+  }
+  const r = await c.var.query("UPDATE psych_forms SET status='completed', answers=$1::jsonb, completed_at=now() WHERE id=$2 AND status='active' RETURNING id", [JSON.stringify(answers), f.id]);
+  if (!r.length) fail(409, "Already submitted");
+  await audit(c, f.consultation_id, "form_submitted", { form_id: f.id });
   return c.json({ status: "completed" });
 });
 
@@ -213,6 +267,7 @@ clinical.get("/consultations/:id/dashboard", async (c) => {
   for (const a of assessments) if (a.status !== "completed") missing.push(`${a.name} not completed (${a.status})`);
   for (const o of d.observers) if (o.status === "pending") missing.push(`Observer response pending: ${o.observer_label}`);
   for (const t of d.tasks) if (t.status !== "completed") missing.push(`${(TASKS as any)[t.task]?.name ?? t.task} not completed`);
+  for (const f of d.forms) if (f.status !== "completed") missing.push(`Questionnaire "${f.title}" not completed (${f.status})`);
   if (!d.notes.some((n: any) => n.kind === "observation")) missing.push("No psychologist behavioural observations recorded");
   if (!Object.keys(d.interview).length) missing.push("Structured clinical interview not started");
   // Historical comparison: earlier submissions of the same instrument for the same patient with this psychologist.
@@ -226,6 +281,7 @@ clinical.get("/consultations/:id/dashboard", async (c) => {
   }
   return c.json({
     assessments, missing, comparison,
+    forms: d.forms.map((f: any) => ({ id: f.id, title: f.title, status: f.status, items: f.items, options: f.options, answers: f.answers })),
     observers: d.observers.map((o: any) => ({ id: o.id, label: o.observer_label, relationship: o.relationship, status: o.status === "pending" && new Date(o.expires_at) < new Date() ? "expired" : o.status, submitted_at: iso(o.submitted_at), answers: o.answers })),
     tasks: d.tasks.map((t: any) => ({ id: t.id, task: t.task, name: (TASKS as any)[t.task]?.name ?? t.task, status: t.status, summary: t.result?.summary ?? null, note: (TASKS as any)[t.task]?.purpose })),
     external: d.external.map((e: any) => ({ ...e, name: (EXTERNAL_INSTRUMENTS as any)[e.instrument] })),
@@ -273,9 +329,11 @@ function buildReport(d: Awaited<ReturnType<typeof collect>>, psychologistEmail: 
   }
   for (const e of d.external) resultLines.push(`${(EXTERNAL_INSTRUMENTS as any)[e.instrument]} (administered ${e.administered_on} by ${e.administered_by}; authorization ${e.authorization_ref}): ` + (e.scores as any[]).map((s) => `${s.label} ${s.value}${s.note ? ` (${s.note})` : ""}`).join("; "));
   for (const t of d.tasks.filter((t: any) => t.status === "completed")) resultLines.push(`Supplementary task, ${(TASKS as any)[t.task]?.name}: ${JSON.stringify(t.result?.summary)}. ${(TASKS as any)[t.task]?.purpose}`);
+  for (const f of d.forms.filter((f: any) => f.status === "completed")) resultLines.push(`Clinician-defined questionnaire "${f.title}" completed (unscored, not a validated instrument): ` + (f.items as string[]).map((q, i) => `${q} -> ${f.options[f.answers[String(i)]]}`).join("; "));
   for (const o of d.observers.filter((o: any) => o.status === "submitted")) resultLines.push(`Observer report (${o.observer_label}${o.relationship ? ", " + o.relationship : ""}): informal, unscored; responses are in the clinical record.`);
   if (!resultLines.length) missing.push("Assessment results");
   for (const a of d.assigns.filter((a: any) => a.status !== "completed")) missing.push(`${name(a)} was assigned but not completed`);
+  for (const f of d.forms.filter((f: any) => f.status !== "completed")) missing.push(`Questionnaire "${f.title}" was assigned but not completed`);
   for (const o of d.observers.filter((o: any) => o.status === "pending")) missing.push(`Observer response pending: ${o.observer_label}`);
   const administered = [...done.map(name), ...d.external.map((e: any) => (EXTERNAL_INSTRUMENTS as any)[e.instrument]), ...d.tasks.filter((t: any) => t.status === "completed").map((t: any) => (TASKS as any)[t.task]?.name)];
   if (!administered.length) missing.push("Assessments administered");

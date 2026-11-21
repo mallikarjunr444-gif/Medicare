@@ -92,7 +92,7 @@ export function PsychologistPanel({ state, instruments, refresh }: { state: Cons
           {(state.results ?? []).map((r) => (
             <div key={r.assignment_id} className="mt-2 rounded-xl border p-3 text-sm">
               <div className="flex items-center justify-between"><span className="font-medium">{r.name}</span><Check size={14} className="text-emerald-600" /></div>
-              {r.total !== null ? <p>Score {r.total} · {r.label}</p> : <p>Screen: {r.screening} ({r.flags.shadedCount ?? 0} shaded responses)</p>}
+              {r.total !== null ? <p>Score {r.total} · {r.label}</p> : r.screening ? <p>Screen: {r.screening} ({r.flags.shadedCount ?? 0} shaded responses)</p> : <p>{r.label}</p>}
               {r.flags.item9Positive && <p className="text-rose-700">Item 9 endorsed — clinical review needed.</p>}
               <p className="mt-1 text-xs text-slate-500">{r.notice}</p>
               {instruments.find((i) => i.id === r.instrument)?.attribution && <p className="mt-1 text-[11px] text-slate-500">{instruments.find((i) => i.id === r.instrument)?.attribution}</p>}

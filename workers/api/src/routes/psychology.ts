@@ -14,7 +14,7 @@ let schemaReady: Promise<void> | null = null;
 export function ensurePsychSchema(q: (t: string, p?: unknown[]) => Promise<Record<string, any>[]>): Promise<void> {
   schemaReady ??= (async () => {
     const r = await q(
-      `SELECT to_regclass('public.psych_reports') IS NOT NULL AS t,
+      `SELECT to_regclass('public.psych_forms') IS NOT NULL AS t,
               EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_psychologist') AS c`);
     if (r[0]?.t === true && r[0]?.c === true) return;
     for (const stmt of PSYCH_SCHEMA) await q(stmt);

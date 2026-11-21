@@ -73,7 +73,7 @@ export function errorMessage(e: unknown): string {
 }
 
 // ---------- stages 7-15 ----------
-export interface TaskRun { id: string; task: 'reaction' | 'digitspan'; name: string; status: 'assigned' | 'active' | 'completed'; result?: { summary: Record<string, unknown> } }
+export interface TaskRun { id: string; task: 'reaction' | 'digitspan' | 'stroop' | 'nback'; name: string; status: 'assigned' | 'active' | 'completed'; result?: { summary: Record<string, unknown> } }
 export interface NoteRow { id: string; kind: string; body: string; created_at: string; updated_at: string }
 export interface Dashboard {
   assessments: { id: string; instrument: string; name: string; status: string; result: null | { total: number | null; severity: string; label: string | null; screening: string | null; notice: string; submitted_at: string; corrected: boolean } }[]
@@ -81,9 +81,11 @@ export interface Dashboard {
   comparison: { instrument: string; name: string; total_score: number | null; severity: string; submitted_at: string }[]
   observers: { id: string; label: string; relationship: string | null; status: string; submitted_at: string | null; answers: { answers: Record<string, number>; comment: string } | null }[]
   tasks: { id: string; name: string; status: string; summary: Record<string, unknown> | null; note: string }[]
+  forms: { id: string; title: string; status: string; items: string[]; options: string[]; answers: Record<string, number> | null }[]
   external: { id: string; name: string; administered_on: string; administered_by: string; authorization_ref: string; scores: { label: string; value: string; note?: string }[]; comments: string | null }[]
   alerts: { id: string; message: string; acknowledged_at: string | null }[]
 }
+export interface CustomForm { id: string; title: string; status: 'assigned' | 'active' | 'completed'; intro?: string; options?: string[]; items?: string[]; answers?: Record<string, number> | null }
 export interface Report { exists: boolean; order: [string, string][]; sections?: Record<string, string>; missing?: string[]; status?: 'draft' | 'approved'; approver_name?: string; approver_credentials?: string; approved_at?: string; draft_notice?: string }
 export interface ObserverForm { title: string; notice: string; options: string[]; items: string[]; observer_label: string }
 
@@ -92,6 +94,10 @@ export const psychX = {
   assignTask: (id: string, task: string) => send('post', `/consultations/${id}/tasks`, { task }),
   startTask: (tid: string) => send('post', `/tasks/${tid}/start`),
   submitTask: (tid: string, trials: unknown[]) => send('post', `/tasks/${tid}/submit`, { trials }),
+  forms: (id: string) => get<CustomForm[]>(`/consultations/${id}/forms`),
+  createForm: (id: string, body: { title: string; intro: string; options: string[]; items: string[] }) => send('post', `/consultations/${id}/forms`, body),
+  startForm: (fid: string) => send('post', `/forms/${fid}/start`),
+  submitForm: (fid: string, answers: Record<string, number>) => send('post', `/forms/${fid}/submit`, { answers }),
   invite: (id: string, label: string, relationship: string) => send<{ id: string; token: string }>('post', `/consultations/${id}/observers`, { label, relationship }),
   revokeInvite: (oid: string) => send('post', `/observers/${oid}/revoke`),
   external: (id: string, body: Record<string, unknown>) => send('post', `/consultations/${id}/external`, body),

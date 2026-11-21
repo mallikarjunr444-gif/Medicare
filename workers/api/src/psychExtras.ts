@@ -18,6 +18,8 @@ export const OBSERVER_FORM = {
 
 export const TASKS = {
   reaction: { id: "reaction", name: "Simple reaction time", trials: 10, purpose: "Supplementary attention/response-speed task. Not an IQ or diagnostic measure." },
+  stroop: { id: "stroop", name: "Colour-word (Stroop) task", trials: 24, purpose: "Supplementary attention/inhibition task. Not a diagnostic measure." },
+  nback: { id: "nback", name: "1-back memory task", trials: 30, purpose: "Supplementary working-memory task. Not a diagnostic or IQ measure." },
   digitspan: { id: "digitspan", name: "Digit span (forward)", maxLen: 9, purpose: "Supplementary short-term memory task. Not a WAIS-IV subtest and not an IQ measure." },
 } as const;
 export type TaskId = keyof typeof TASKS;
@@ -39,6 +41,32 @@ export function summariseTask(task: TaskId, raw: unknown): Record<string, unknow
     }
     if (!rts.length) return "no valid trials";
     return { valid_trials: rts.length, median_rt_ms: median(rts), mean_rt_ms: Math.round(rts.reduce((a, b) => a + b, 0) / rts.length), anticipations, lapses_over_1s: lapses };
+  }
+  if (task === "stroop") {
+    if (r.trials.length !== TASKS.stroop.trials) return `expected ${TASKS.stroop.trials} trials`;
+    const COLORS = ["red", "green", "blue", "yellow"];
+    const con: number[] = [], inc: number[] = []; let errors = 0;
+    for (const t of r.trials as any[]) {
+      const ms = Number(t?.rt_ms), word = String(t?.word), color = String(t?.color), key = String(t?.key ?? "").toLowerCase();
+      if (!COLORS.includes(word) || !COLORS.includes(color) || key.length > 1 || !Number.isFinite(ms) || ms < 0 || ms > 60000) return "invalid Stroop trial";
+      if (key !== color[0]) { errors++; continue; } // correctness is decided here: the key must be the first letter of the INK colour
+      (word === color ? con : inc).push(ms);
+    }
+    if (!con.length || !inc.length) return "not enough correct trials";
+    return { trials: 24, errors, accuracy_pct: Math.round(((24 - errors) / 24) * 100), congruent_median_ms: median(con), incongruent_median_ms: median(inc), interference_ms: median(inc) - median(con) };
+  }
+  if (task === "nback") {
+    if (r.trials.length !== TASKS.nback.trials) return `expected ${TASKS.nback.trials} trials`;
+    let hits = 0, misses = 0, falseAlarms = 0, correctRejections = 0; let prev = "";
+    for (const t of r.trials as any[]) {
+      const letter = String(t?.letter ?? "");
+      if (!/^[A-Z]$/.test(letter) || typeof t?.pressed !== "boolean") return "invalid n-back trial";
+      const target = letter === prev; // target status comes from the sequence itself, not from the client
+      if (target && t.pressed) hits++; else if (target) misses++; else if (t.pressed) falseAlarms++; else correctRejections++;
+      prev = letter;
+    }
+    const targets = hits + misses;
+    return { trials: 30, targets, hits, misses, false_alarms: falseAlarms, correct_rejections: correctRejections, hit_rate_pct: targets ? Math.round((hits / targets) * 100) : null };
   }
   if (r.trials.length < 1 || r.trials.length > 20) return "invalid number of trials";
   let longest = 0; let correct = 0;

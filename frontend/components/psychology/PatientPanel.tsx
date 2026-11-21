@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ClipboardList, ShieldCheck, UserRound } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { psych, psychX, errorMessage, type Assignment, type ConsultationState, type Instrument, type TaskRun } from '@/lib/psychApi'
+import { psych, psychX, errorMessage, type Assignment, type ConsultationState, type Instrument, type TaskRun, type CustomForm } from '@/lib/psychApi'
 import dynamic from 'next/dynamic'
 
 // jsPsych touches `window` when imported, so it must only load in the browser.
@@ -79,11 +79,14 @@ export function PatientPanel({ state, instruments, refresh }: { state: Consultat
   const seeded = useRef(false)
   const [tasks, setTasks] = useState<TaskRun[]>([])
   const [running, setRunning] = useState<string | null>(null)
+  const [forms, setForms] = useState<CustomForm[]>([])
+  const [formAnswers, setFormAnswers] = useState<Record<string, Record<string, number>>>({})
+  const [formBusy, setFormBusy] = useState(false)
 
   useEffect(() => {
     if (running) return // don't re-render the task host while a task is running
     let live = true
-    const load = () => psychX.tasks(id).then((t) => { if (live) setTasks(t) }).catch(() => undefined)
+    const load = () => { psychX.tasks(id).then((t) => { if (live) setTasks(t) }).catch(() => undefined); psychX.forms(id).then((f) => { if (live) setForms(f) }).catch(() => undefined) }
     load()
     const t = setInterval(load, 4000)
     return () => { live = false; clearInterval(t) }
@@ -174,6 +177,31 @@ export function PatientPanel({ state, instruments, refresh }: { state: Consultat
                 )}
               </div>
             ))}
+          </div>
+        )}
+        {forms.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <h3 className="text-sm font-semibold">Questionnaires from your psychologist</h3>
+            {forms.map((f) => {
+              const a = formAnswers[f.id] ?? {}
+              const complete = !!f.items && f.items.every((_, i) => a[String(i)] !== undefined)
+              return (
+                <div key={f.id} className="rounded-xl border p-3">
+                  <div className="flex items-center justify-between"><p className="text-sm font-medium">{f.title}</p><p className="text-xs text-slate-500">{f.status === 'assigned' ? 'Waiting for your psychologist to start it' : f.status === 'active' ? 'In progress' : 'Completed'}</p></div>
+                  {f.status === 'active' && f.items && f.options && (
+                    <div>
+                      {f.intro && <p className="mt-1 text-xs text-slate-500">{f.intro}</p>}
+                      {f.items.map((q, i) => (
+                        <fieldset key={i} className="mt-3"><legend className="text-sm">{i + 1}. {q}</legend>
+                          <div className="mt-1 flex flex-wrap gap-2">{f.options!.map((o, v) => <label key={o} className={`cursor-pointer rounded-lg border px-2 py-1 text-xs ${a[String(i)] === v ? 'border-teal-700 bg-teal-50' : ''}`}><input type="radio" className="mr-1" name={`${f.id}-${i}`} checked={a[String(i)] === v} onChange={() => setFormAnswers({ ...formAnswers, [f.id]: { ...a, [String(i)]: v } })} />{o}</label>)}</div>
+                        </fieldset>
+                      ))}
+                      <button disabled={!complete || formBusy} className="mt-3 w-full rounded-xl bg-teal-700 p-2 text-sm text-white disabled:opacity-40" onClick={async () => { setFormBusy(true); try { await psychX.submitForm(f.id, a); refresh() } catch (e) { toast.error(errorMessage(e)) } finally { setFormBusy(false) } }}>Submit</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
         {support && <div role="alert" className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{support}</div>}

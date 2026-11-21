@@ -31,6 +31,8 @@ function Dash({ id }: { id: string }) {
       </section>
       {d.comparison.length > 0 && <section><h3 className="font-semibold">Earlier results (same patient)</h3>
         {d.comparison.map((c, i) => <p key={i}>{c.name}: {c.total_score ?? '—'} ({c.severity}) · {fmt(c.submitted_at)}</p>)}</section>}
+      <section><h3 className="font-semibold">Custom questionnaires <span className="font-normal text-slate-500">(unscored)</span></h3>
+        {d.forms.length === 0 ? <p className="text-slate-500">None.</p> : d.forms.map((f) => <div key={f.id} className="mt-1"><p>{f.title}: {f.status}</p>{f.answers && <ul className="ml-4 list-disc text-xs">{f.items.map((q, i) => <li key={i}>{q} → {f.options[f.answers![String(i)]]}</li>)}</ul>}</div>)}</section>
       <section><h3 className="font-semibold">Observer questionnaires</h3>
         {d.observers.length === 0 ? <p className="text-slate-500">None invited.</p> : d.observers.map((o) => <p key={o.id}>{o.label}{o.relationship ? ` (${o.relationship})` : ''}: {o.status}</p>)}</section>
       <section><h3 className="font-semibold">Supplementary tasks <span className="font-normal text-slate-500">(not IQ or diagnostic)</span></h3>
@@ -132,6 +134,8 @@ function Extras({ id }: { id: string }) {
   const [rel, setRel] = useState('')
   const [link, setLink] = useState<string | null>(null)
   const [d, setD] = useState<Dashboard | null>(null)
+  const [form, setForm] = useState({ title: '', intro: '', options: 'Never\nSometimes\nOften', items: '' })
+  const lines = (v: string) => v.split('\n').map((x) => x.trim()).filter(Boolean)
   const load = useCallback(() => psychX.dashboard(id).then(setD).catch(() => undefined), [id])
   useEffect(() => { load() }, [load])
   const invite = async () => {
@@ -146,9 +150,20 @@ function Extras({ id }: { id: string }) {
         {link && <p className="mt-2 break-all rounded-xl bg-teal-50 p-2 text-xs">Copy now — it will not be shown again: <b>{link}</b></p>}
         {d?.observers.map((o) => <div key={o.id} className="mt-2 flex items-center justify-between rounded-xl border p-2"><span>{o.label} — {o.status}</span>{o.status === 'pending' && <button className={ghost} onClick={() => run(() => psychX.revokeInvite(o.id))}>Revoke</button>}</div>)}
       </section>
+      <section><h3 className="font-semibold">Build a questionnaire</h3>
+        <p className="text-xs text-slate-500">Your own questions, one per line, with shared answer options. It is not a validated instrument, so MediCare never scores it. Do not copy copyrighted tests.</p>
+        <input className={`${input} mt-2`} placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        <input className={`${input} mt-2`} placeholder="Instructions for the patient (optional)" value={form.intro} onChange={(e) => setForm({ ...form, intro: e.target.value })} />
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <label className="text-xs">Answer options (one per line, 2–7)<textarea className={input} rows={4} value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} /></label>
+          <label className="text-xs">Questions (one per line)<textarea className={input} rows={4} value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} /></label>
+        </div>
+        <button className={`${btn} mt-2`} disabled={!form.title.trim() || lines(form.items).length < 1 || lines(form.options).length < 2} onClick={() => run(async () => { await psychX.createForm(id, { title: form.title, intro: form.intro, options: lines(form.options), items: lines(form.items) }); setForm({ ...form, title: '', items: '' }) })}>Assign questionnaire</button>
+        {d?.forms.map((f) => <div key={f.id} className="mt-2 flex items-center justify-between rounded-xl border p-2"><span>{f.title} — {f.status}</span>{f.status === 'assigned' && <button className={btn} onClick={() => run(() => psychX.startForm(f.id))}>Start for patient</button>}</div>)}
+      </section>
       <section><h3 className="font-semibold">Supplementary cognitive tasks</h3>
         <p className="text-xs text-slate-500">Built with jsPsych. Not IQ tests, not WAIS-IV subtests.</p>
-        <div className="mt-2 flex gap-2"><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'reaction'))}>Assign reaction time</button><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'digitspan'))}>Assign digit span</button></div>
+        <div className="mt-2 flex flex-wrap gap-2"><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'reaction'))}>Assign reaction time</button><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'digitspan'))}>Assign digit span</button><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'stroop'))}>Assign Stroop</button><button className={ghost} onClick={() => run(() => psychX.assignTask(id, 'nback'))}>Assign 1-back</button></div>
         {d?.tasks.map((t) => <div key={t.id} className="mt-2 flex items-center justify-between rounded-xl border p-2"><span>{t.name} — {t.status}</span>{t.status === 'assigned' && <button className={btn} onClick={() => run(() => psychX.startTask(t.id))}>Start for patient</button>}</div>)}
       </section>
     </div>

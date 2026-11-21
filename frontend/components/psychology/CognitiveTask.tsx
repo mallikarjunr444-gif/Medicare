@@ -12,7 +12,7 @@ type Trial = Record<string, unknown>
  * Supplementary cognitive tasks built on jsPsych (MIT). They are NOT IQ tests and NOT WAIS-IV subtests.
  * Raw trials go to the server, which recomputes every summary figure itself.
  */
-export function CognitiveTask({ task, onDone }: { task: 'reaction' | 'digitspan'; onDone: (trials: Trial[]) => Promise<void> | void }) {
+export function CognitiveTask({ task, onDone }: { task: 'reaction' | 'digitspan' | 'stroop' | 'nback'; onDone: (trials: Trial[]) => Promise<void> | void }) {
   const host = useRef<HTMLDivElement>(null)
   const doneRef = useRef(onDone)
   useEffect(() => { doneRef.current = onDone }, [onDone])
@@ -38,6 +38,33 @@ export function CognitiveTask({ task, onDone }: { task: 'reaction' | 'digitspan'
           stimulus: '<div style="width:90px;height:90px;border-radius:50%;background:#16a34a;margin:auto"></div>',
           choices: [' '], trial_duration: 5000,
           on_finish: (d: { rt: number | null }) => { out.push({ rt_ms: d.rt ?? 5000 }) },
+        })
+      }
+    } else if (task === 'stroop') {
+      const COLORS = ['red', 'green', 'blue', 'yellow']
+      const css: Record<string, string> = { red: '#dc2626', green: '#16a34a', blue: '#2563eb', yellow: '#ca8a04' }
+      timeline.push({ type: HtmlKeyboardResponse, stimulus: '<p>Colour task: words appear in coloured ink. Press the key for the <b>ink colour</b>, not the word.</p><p><b>R</b> = red, <b>G</b> = green, <b>B</b> = blue, <b>Y</b> = yellow.</p><p>Press space to begin.</p>', choices: [' '] })
+      const order = Array.from({ length: 24 }, (_, i) => i < 12).sort(() => Math.random() - 0.5) // 12 matching + 12 mismatching
+      for (const same of order) {
+        const color = COLORS[Math.floor(Math.random() * 4)]
+        const word = same ? color : COLORS.filter((c) => c !== color)[Math.floor(Math.random() * 3)]
+        timeline.push({ type: HtmlKeyboardResponse, stimulus: '<div style="font-size:48px">+</div>', choices: 'NO_KEYS', trial_duration: 500 })
+        timeline.push({
+          type: HtmlKeyboardResponse, stimulus: `<div style="font-size:56px;font-weight:700;color:${css[color]}">${word.toUpperCase()}</div>`,
+          choices: ['r', 'g', 'b', 'y'], trial_duration: 4000,
+          on_finish: (d: { rt: number | null; response: string | null }) => { out.push({ word, color, key: d.response ?? '', rt_ms: d.rt ?? 4000 }) },
+        })
+      }
+    } else if (task === 'nback') {
+      timeline.push({ type: HtmlKeyboardResponse, stimulus: '<p>Memory task: letters appear one at a time. Press the <b>space bar</b> whenever the letter is the <b>same as the one just before it</b>. Otherwise press nothing.</p><p>Press space to begin.</p>', choices: [' '] })
+      let prev = ''
+      for (let i = 0; i < 30; i++) {
+        const letters = 'BCDFGHJKLM'
+        const letter = i > 0 && Math.random() < 0.3 ? prev : letters[Math.floor(Math.random() * letters.length)]
+        prev = letter
+        timeline.push({
+          type: HtmlKeyboardResponse, stimulus: `<div style="font-size:64px">${letter}</div>`, choices: [' '], response_ends_trial: false, trial_duration: 1500, post_trial_gap: 500,
+          on_finish: (d: { response: string | null }) => { out.push({ letter, pressed: d.response !== null }) },
         })
       }
     } else {

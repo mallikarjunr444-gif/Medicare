@@ -4,7 +4,7 @@
 //    form before clinical use (see `notice`). Scores are screening results, never diagnoses.
 // WAIS-IV, CAARS, PAI and any DSM-5-TR interview material are proprietary and are intentionally NOT included.
 
-export type InstrumentId = "gad7" | "phq9" | "asrs6";
+export type InstrumentId = "gad7" | "phq9" | "asrs6" | "miniipip";
 
 export interface Instrument {
   id: InstrumentId;
@@ -21,6 +21,17 @@ export interface Instrument {
 
 const FREQ = ["Not at all", "Several days", "More than half the days", "Nearly every day"];
 const OVER_2_WEEKS = "Over the last 2 weeks, how often have you been bothered by the following problems?";
+
+// [item text, trait, reverse-keyed]. International Personality Item Pool (public domain); wording and keys as in psytools.
+const MINI_IPIP_ITEMS: [string, string, boolean][] = [
+  ["I am the life of the party", "extraversion", false], ["I sympathize with others' feelings", "agreeableness", false], ["I get chores done right away", "conscientiousness", false],
+  ["I have frequent mood swings", "neuroticism", false], ["I have a vivid imagination", "openness", false], ["I don't talk a lot", "extraversion", true],
+  ["I am not interested in other people's problems", "agreeableness", true], ["I often forget to put things back in their proper place", "conscientiousness", true],
+  ["I am relaxed most of the time", "neuroticism", true], ["I am not interested in abstract ideas", "openness", true], ["I talk to a lot of different people at parties", "extraversion", false],
+  ["I feel others' emotions", "agreeableness", false], ["I like order", "conscientiousness", false], ["I get upset easily", "neuroticism", false],
+  ["I have difficulty understanding abstract ideas", "openness", true], ["I keep in the background", "extraversion", true], ["I am not really interested in others", "agreeableness", true],
+  ["I make a mess of things", "conscientiousness", true], ["I seldom feel blue", "neuroticism", true], ["I do not have a good imagination", "openness", true],
+];
 
 export const INSTRUMENTS: Record<InstrumentId, Instrument> = {
   gad7: {
@@ -68,6 +79,13 @@ export const INSTRUMENTS: Record<InstrumentId, Instrument> = {
     notice: "Screening result only. It is not a diagnosis.",
     attribution: "The 6-question Adult Self-Report Scale-Version1.1 (ASRS-V1.1) Screener is a subset of the 18-question Adult ADHD Self-Report Scale-Version1.1 (Adult ASRSV1.1) Symptom Checklist. © New York University and the President and Fellows of Harvard College.",
   },
+  miniipip: {
+    id: "miniipip", name: "Mini-IPIP (Big Five)", fullName: "Mini-IPIP Big Five personality scale", version: "Mini-IPIP (Donnellan et al., 2006)",
+    purpose: "Personality traits (descriptive, not clinical)", intro: "Describe yourself as you generally are now, not as you wish to be in the future. Indicate how accurately each statement describes you.",
+    options: ["Very inaccurate", "Moderately inaccurate", "Neither accurate nor inaccurate", "Moderately accurate", "Very accurate"],
+    items: MINI_IPIP_ITEMS.map((x) => x[0]),
+    notice: "Descriptive personality traits from the public-domain IPIP. This is not a clinical screen, has no diagnostic cut-offs, and is not a replacement for the PAI.",
+  },
 };
 
 export const isInstrumentId = (v: unknown): v is InstrumentId => typeof v === "string" && v in INSTRUMENTS;
@@ -77,7 +95,7 @@ export interface ScoreResult {
   severity: string;
   label: string;
   screening?: "positive" | "negative";
-  flags: { item9Positive?: boolean; shadedCount?: number };
+  flags: { item9Positive?: boolean; shadedCount?: number; traits?: Record<string, number> };
   notice: string;
   attribution?: string; // copyright credit that the rights holder requires wherever the instrument or its results appear
 }
@@ -107,6 +125,13 @@ export function score(id: InstrumentId, answers: Record<string, number>): ScoreR
     const total = vals.reduce((a, b) => a + b, 0);
     const [severity, label] = total <= 4 ? ["minimal", "None to minimal depression"] : total <= 9 ? ["mild", "Mild depression"] : total <= 14 ? ["moderate", "Moderate depression"] : total <= 19 ? ["moderately_severe", "Moderately severe depression"] : ["severe", "Severe depression"];
     return { total, severity, label, flags: { item9Positive: vals[8] > 0 }, notice: ins.notice };
+  }
+  if (id === "miniipip") {
+    // Options are stored 0-4 and score 1-5; reverse-keyed items are flipped (6 - value). Each trait is the sum of 4 items (4-20).
+    const traits: Record<string, number> = {};
+    MINI_IPIP_ITEMS.forEach(([, trait, rev], i) => { const v = vals[i] + 1; traits[trait] = (traits[trait] ?? 0) + (rev ? 6 - v : v); });
+    const names: Record<string, string> = { extraversion: "Extraversion", agreeableness: "Agreeableness", conscientiousness: "Conscientiousness", neuroticism: "Neuroticism", openness: "Openness" };
+    return { total: null, severity: "descriptive", label: Object.keys(names).map((k) => `${names[k]} ${traits[k]}/20`).join(" · "), flags: { traits }, notice: ins.notice };
   }
   // ASRS-v1.1 Part A: items 1-3 are shaded at "Sometimes" or higher; items 4-6 at "Often" or higher.
   // Four or more shaded responses is a positive screen. There is no summed severity score.

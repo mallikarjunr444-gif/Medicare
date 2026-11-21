@@ -57,8 +57,20 @@ describe("validated scoring", () => {
     expect(validateAnswers("gad7", { ...all(7, 0), extra: 1 })).toMatch(/unknown/);
     expect(validateAnswers("gad7", null)).toMatch(/object/);
   });
+  it("Mini-IPIP trait scores use the published reverse keys", () => {
+    const allMid = score("miniipip", all(20, 2)); // "neither" = 3 on every item, reversed or not
+    expect(allMid.flags.traits).toEqual({ extraversion: 12, agreeableness: 12, conscientiousness: 12, neuroticism: 12, openness: 12 });
+    expect(allMid.total).toBeNull();
+    const top = score("miniipip", all(20, 4)); // "very accurate" everywhere: 2 straight (5 each) + 2 reversed (1 each) = 12
+    expect(top.flags.traits!.extraversion).toBe(12);
+    const hi = score("miniipip", Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i), [5, 6, 7, 8, 9, 14, 15, 16, 17, 18, 19].includes(i) ? 0 : 4])));
+    expect(hi.flags.traits).toEqual({ extraversion: 20, agreeableness: 20, conscientiousness: 20, neuroticism: 20, openness: 20 }); // endorse straight items, reject reversed ones
+    expect(validateAnswers("miniipip", all(20, 4))).toBeNull();
+    expect(validateAnswers("miniipip", all(20, 5))).toMatch(/valid answer/);
+    expect(INSTRUMENTS.miniipip.items).toHaveLength(20);
+  });
   it("contains no proprietary instruments", () => {
-    expect(Object.keys(INSTRUMENTS).sort()).toEqual(["asrs6", "gad7", "phq9"]);
+    expect(Object.keys(INSTRUMENTS).sort()).toEqual(["asrs6", "gad7", "miniipip", "phq9"]);
   });
 });
 
