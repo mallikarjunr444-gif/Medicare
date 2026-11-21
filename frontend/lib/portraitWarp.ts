@@ -26,6 +26,8 @@ export interface PortraitPose {
   wide: number
   /** 0..1 eyebrow lift. */
   brow: number
+  /** -0.5 (corners down, concerned) .. 1 (broad smile); 0 is neutral. */
+  smile?: number
 }
 
 interface Cell {
@@ -209,7 +211,11 @@ export class PortraitWarp {
     else dv = -openPx * 0.16 * wu * smooth(1 - -v / (m.w * 0.42))
     const wideU = smooth(1 - Math.abs(u) / (m.w * 0.82))
     const gv = smooth(1 - Math.abs(v) / (m.w * 0.9))
-    const nu = u + u * (pose.wide - 1) * wideU * gv
+    const smile = pose.smile ?? 0
+    // Smile: lip corners rise and the mouth spreads a little; fades out at the centre of the lips.
+    const corner = smooth(Math.min(1, Math.abs(u) / (m.w * 0.85))) * gv
+    dv -= smile * m.w * 0.16 * corner
+    const nu = u + u * ((pose.wide - 1) * wideU * gv + smile * 0.05 * corner)
     const nv0 = v0 + dv
     return [m.cx + nu * m.cos - nv0 * m.sin, m.cy + nu * m.sin + nv0 * m.cos]
   }
@@ -227,7 +233,7 @@ export class PortraitWarp {
     for (const c of this.cells) {
       if (c.zone.startsWith('eye') && pose.blink < 0.01) continue
       if (c.zone.startsWith('brow') && pose.brow < 0.01) continue
-      if (c.zone === 'mouth' && !mouthOpen && Math.abs(pose.wide - 1) < 0.01) continue
+      if (c.zone === 'mouth' && !mouthOpen && Math.abs(pose.wide - 1) < 0.01 && Math.abs(pose.smile ?? 0) < 0.02) continue
       const p00 = this.displace(c.x0, c.y0, c.zone, pose, openPx)
       const p10 = this.displace(c.x1, c.y0, c.zone, pose, openPx)
       const p01 = this.displace(c.x0, c.y1, c.zone, pose, openPx)

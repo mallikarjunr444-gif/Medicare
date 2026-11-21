@@ -7,6 +7,7 @@ import { DOCTORS } from '@/lib/doctorTypes'
 import { DOCTOR_FACE_DATA } from '@/lib/doctorFaceData'
 import { PortraitWarp } from '@/lib/portraitWarp'
 import { readVoiceDrive } from '@/lib/audioEnergy'
+import { EXPRESSION_POSE, type DoctorExpression } from '@/lib/doctorExpression'
 import {
   RotateCcw,
   WifiOff,
@@ -20,6 +21,8 @@ interface PhotorealisticDigitalHumanProps {
   subtitles?: string
   /** 0..1 level for speech that has no audio element (browser speech synthesis fallback). */
   fallbackSpeechLevel?: number
+  /** Facial expression: neutral, warm (gentle smile) or concerned. */
+  expression?: DoctorExpression
   speakingVideoSrc?: string | null
   speakingVideoStartAt?: number
   getSpeakingAudioTime?: () => number | null
@@ -42,6 +45,7 @@ export function PhotorealisticDigitalHuman({
   hasSeparateTtsAudio = false,
   subtitles = '',
   fallbackSpeechLevel = 0,
+  expression = 'neutral',
   speakingVideoSrc = null,
   speakingVideoStartAt = 0,
   getSpeakingAudioTime,
@@ -75,8 +79,14 @@ export function PhotorealisticDigitalHuman({
     brows: { lift: 0, furrow: 0 },
     mouth: { open: 0, wide: 1 },
     browLift: 0,
+    smile: 0,
+    exprBrow: 0,
     doubleBlink: false,
   })
+  const expressionRef = useRef<DoctorExpression>(expression)
+  useEffect(() => {
+    expressionRef.current = expression
+  }, [expression])
   const fallbackLevelRef = useRef(fallbackSpeechLevel)
   useEffect(() => {
     fallbackLevelRef.current = fallbackSpeechLevel
@@ -304,6 +314,10 @@ export function PhotorealisticDigitalHuman({
       mouth.wide += (wideTarget - mouth.wide) * 0.3
       if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') (window as unknown as { __portraitMouth?: number }).__portraitMouth = mouth.open
       sim.browLift += (Math.min(1, mouth.open * 1.4) * 0.6 - sim.browLift) * 0.1
+      // Expression eases in over about a second so it never snaps. Smile is eased down while the mouth is wide open.
+      const ex = EXPRESSION_POSE[expressionRef.current]
+      sim.smile += (ex.smile * (1 - Math.min(1, mouth.open * 1.5)) - sim.smile) * 0.06
+      sim.exprBrow += (ex.brow - sim.exprBrow) * 0.06
 
       const debug = typeof window !== 'undefined' && process.env.NODE_ENV !== 'production'
         ? (window as unknown as { __portraitPose?: Partial<{ blink: number; open: number; wide: number; brow: number }> }).__portraitPose
@@ -318,7 +332,8 @@ export function PhotorealisticDigitalHuman({
           blink: debug?.blink ?? blink,
           open: debug?.open ?? mouth.open,
           wide: debug?.wide ?? mouth.wide,
-          brow: debug?.brow ?? sim.browLift,
+          brow: debug?.brow ?? Math.min(1, sim.browLift + sim.exprBrow),
+          smile: sim.smile,
         })
       }
       ctx.restore()

@@ -41,6 +41,7 @@ import {
   AlertOctagon,
 } from 'lucide-react'
 import { PhotorealisticDigitalHuman } from './PhotorealisticDigitalHuman'
+import { expressionFor } from '@/lib/doctorExpression'
 import { attachAudioAnalyser, setAudioOutputMuted } from '@/lib/audioEnergy'
 import { PatientWebcamPiP } from '../video/PatientWebcamPiP'
 import { VoiceOrb } from '@/components/ui/voice-orb'
@@ -939,6 +940,7 @@ export function DoctorVideoCall({
               hasSeparateTtsAudio={hasSeparateTtsAudio}
               subtitles={subtitles}
               fallbackSpeechLevel={audioLevel}
+              expression={expressionFor(patientStatements[patientStatements.length - 1]?.text, doctorState)}
               speakingVideoSrc={doctorVideoSrc}
               speakingVideoStartAt={speakingVideoStartAt}
               getSpeakingAudioTime={getCurrentSpokenAudioTime}
