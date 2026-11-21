@@ -205,6 +205,6 @@ describe("stages 7-15", () => {
     const rows = (await db.query("SELECT action, detail::text d FROM psych_audit_log")).rows as any[];
     expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(["observer_invited", "task_submitted", "external_result_entered", "report_approved", "observer_submitted"]));
     const all = JSON.stringify(rows);
-    expect(all).not.toMatch(/Calm, cooperative|Inattention|FSIQ|104|Test Patient/);
+    expect(all).not.toMatch(/Calm, cooperative|Inattention|FSIQ|Test Patient|query attention/);
   });
 });
