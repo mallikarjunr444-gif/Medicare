@@ -1,6 +1,6 @@
 # Dr. Ananya wellness session: camera observations (phase 1)
 
-Open **Wellness** in the app menu. Everything runs in the browser; no video, image or audio is uploaded or stored.
+Open **Wellness** in the app menu. The camera runs quietly in the background: no preview, landmark overlay or live numbers are shown; only a "Camera: On" badge and a Stop button stay visible. Everything runs in the browser; no video, image or audio is uploaded or stored.
 
 ## What is measured
 | Measurement | How |
