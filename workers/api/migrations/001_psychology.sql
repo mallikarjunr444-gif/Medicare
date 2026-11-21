@@ -90,3 +90,72 @@ CREATE TABLE IF NOT EXISTS psych_audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS psych_audit_consult_idx ON psych_audit_log (consultation_id, created_at);
+
+CREATE TABLE IF NOT EXISTS psych_observer_invites (
+  id varchar PRIMARY KEY,
+  consultation_id varchar NOT NULL REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  token_hash varchar NOT NULL UNIQUE,
+  observer_label varchar NOT NULL,
+  relationship varchar,
+  status varchar NOT NULL DEFAULT 'pending',
+  expires_at timestamptz NOT NULL,
+  created_by varchar NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  submitted_at timestamptz,
+  answers jsonb
+);
+
+CREATE TABLE IF NOT EXISTS psych_task_runs (
+  id varchar PRIMARY KEY,
+  consultation_id varchar NOT NULL REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  task varchar NOT NULL,
+  status varchar NOT NULL DEFAULT 'assigned',
+  result jsonb,
+  assigned_by varchar NOT NULL REFERENCES users(id),
+  assigned_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS psych_external_results (
+  id varchar PRIMARY KEY,
+  consultation_id varchar NOT NULL REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  instrument varchar NOT NULL,
+  administered_on date NOT NULL,
+  administered_by varchar NOT NULL,
+  authorization_ref varchar NOT NULL,
+  scores jsonb NOT NULL,
+  comments text,
+  entered_by varchar NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS psych_interview (
+  consultation_id varchar PRIMARY KEY REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_by varchar REFERENCES users(id),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS psych_notes (
+  id varchar PRIMARY KEY,
+  consultation_id varchar NOT NULL REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  author_id varchar NOT NULL REFERENCES users(id),
+  kind varchar NOT NULL,
+  body text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS psych_notes_consult_idx ON psych_notes (consultation_id, created_at);
+
+CREATE TABLE IF NOT EXISTS psych_reports (
+  consultation_id varchar PRIMARY KEY REFERENCES psych_consultations(id) ON DELETE CASCADE,
+  sections jsonb NOT NULL,
+  missing jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status varchar NOT NULL DEFAULT 'draft',
+  approver_name varchar,
+  approver_credentials varchar,
+  approved_by varchar REFERENCES users(id),
+  approved_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

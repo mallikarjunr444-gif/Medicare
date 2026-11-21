@@ -16,6 +16,7 @@ export interface Instrument {
   options: string[]; // index = score
   items: string[];
   notice: string;
+  attribution?: string; // copyright credit that the rights holder requires wherever the instrument or its results appear
 }
 
 const FREQ = ["Not at all", "Several days", "More than half the days", "Nearly every day"];
@@ -26,7 +27,7 @@ export const INSTRUMENTS: Record<InstrumentId, Instrument> = {
     id: "gad7", name: "GAD-7", fullName: "Generalized Anxiety Disorder-7", version: "GAD-7 (Spitzer et al., 2006)",
     purpose: "Anxiety symptom screening", intro: OVER_2_WEEKS, options: FREQ,
     items: [
-      "Feeling nervous, anxious or on edge",
+      "Feeling nervous, anxious, or on edge",
       "Not being able to stop or control worrying",
       "Worrying too much about different things",
       "Trouble relaxing",
@@ -45,10 +46,10 @@ export const INSTRUMENTS: Record<InstrumentId, Instrument> = {
       "Trouble falling or staying asleep, or sleeping too much",
       "Feeling tired or having little energy",
       "Poor appetite or overeating",
-      "Feeling bad about yourself, or that you are a failure or have let yourself or your family down",
+      "Feeling bad about yourself — or that you are a failure or have let yourself or your family down",
       "Trouble concentrating on things, such as reading the newspaper or watching television",
-      "Moving or speaking so slowly that other people could have noticed? Or the opposite: being so fidgety or restless that you have been moving around a lot more than usual",
-      "Thoughts that you would be better off dead, or of hurting yourself in some way",
+      "Moving or speaking so slowly that other people could have noticed? Or the opposite — being so fidgety or restless that you have been moving around a lot more than usual",
+      "Thoughts that you would be better off dead or of hurting yourself in some way",
     ],
     notice: "Screening result only. It is not a diagnosis and not a suicide-risk assessment.",
   },
@@ -62,9 +63,10 @@ export const INSTRUMENTS: Record<InstrumentId, Instrument> = {
       "How often do you have problems remembering appointments or obligations?",
       "When you have a task that requires a lot of thought, how often do you avoid or delay getting started?",
       "How often do you fidget or squirm with your hands or feet when you have to sit down for a long time?",
-      "How often do you feel overly active and compelled to do things, as if you were driven by a motor?",
+      "How often do you feel overly active and compelled to do things, like you were driven by a motor?",
     ],
-    notice: "Screening result only. It is not a diagnosis. Confirm the official wording and usage rights before clinical use.",
+    notice: "Screening result only. It is not a diagnosis.",
+    attribution: "The 6-question Adult Self-Report Scale-Version1.1 (ASRS-V1.1) Screener is a subset of the 18-question Adult ADHD Self-Report Scale-Version1.1 (Adult ASRSV1.1) Symptom Checklist. © New York University and the President and Fellows of Harvard College.",
   },
 };
 
@@ -77,6 +79,7 @@ export interface ScoreResult {
   screening?: "positive" | "negative";
   flags: { item9Positive?: boolean; shadedCount?: number };
   notice: string;
+  attribution?: string; // copyright credit that the rights holder requires wherever the instrument or its results appear
 }
 
 /** Validates answers (every item present, integer within the option range). Returns an error message or null. */

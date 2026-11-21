@@ -21,6 +21,7 @@ import { ClosingCta, DoctorTiles, Faq, FeatureTiles, Hero, HowItWorks, Safety, S
 import { CompareDoctors, HighlightChips, HighlightsGallery, LanguageViewer, LocalNav } from '@/components/site/ProductSections'
 import { PatientDashboard } from '@/components/patient/PatientDashboard'
 import { PsychologyConsultation } from '@/components/psychology/PsychologyConsultation'
+import { ObserverPage } from '@/components/psychology/ObserverPage'
 import { PatientNotesPanel } from '@/components/patient/PatientNotesPanel'
 import { AppointmentWorkspace } from '@/components/patient/AppointmentWorkspace'
 import { SpecialistBookingModal, type AppointmentRequestResult } from '@/components/doctor/SpecialistBookingModal'
@@ -80,6 +81,8 @@ export default function Home() {
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
   const [view, setView] = useState<View>('home')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [observerToken, setObserverToken] = useState<string | null>(null)
+  useEffect(() => { setObserverToken(new URLSearchParams(window.location.search).get('observer')) }, [])
   const [appointmentDialogOpen, setAppointmentDialogOpen] = useState(false)
   const [latestAppointmentRequest, setLatestAppointmentRequest] = useState<AppointmentRequestResult | null>(null)
 
@@ -113,6 +116,8 @@ export default function Home() {
   }
 
   const showMobileNavigation = view !== 'consultation'
+
+  if (observerToken) return <ObserverPage token={observerToken} />
 
   return (
     <div className={`min-h-screen overflow-x-clip bg-white text-[#1d1d1f] ${showMobileNavigation ? 'pb-20 lg:pb-0' : ''}`}>

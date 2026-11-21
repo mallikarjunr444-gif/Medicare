@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ClipboardList, ShieldCheck, UserRound } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { psych, errorMessage, type Assignment, type ConsultationState, type Instrument } from '@/lib/psychApi'
+import { psych, psychX, errorMessage, type Assignment, type ConsultationState, type Instrument, type TaskRun } from '@/lib/psychApi'
+import dynamic from 'next/dynamic'
+
+// jsPsych touches `window` when imported, so it must only load in the browser.
+const CognitiveTask = dynamic(() => import('./CognitiveTask').then((m) => m.CognitiveTask), { ssr: false, loading: () => <p className="text-sm text-slate-500">Loading activity…</p> })
 
 const CONSENTS: [string, string, string][] = [
   ['online_consultation', 'Online psychological consultation', 'required'],
@@ -44,6 +48,7 @@ function AssessmentForm({ assignment, instrument, onDone }: { assignment: Assign
     <div className="rounded-2xl border p-4">
       <h3 className="font-semibold">{instrument.name}</h3>
       <p className="text-xs text-slate-500">{instrument.intro}</p>
+      {instrument.attribution && <p className="mt-1 text-[11px] text-slate-500">{instrument.attribution}</p>}
       <div className="mt-1 h-1.5 overflow-hidden rounded bg-slate-100" aria-hidden><div className="h-full bg-teal-600" style={{ width: `${(answered / instrument.items.length) * 100}%` }} /></div>
       {instrument.items.map((q, i) => (
         <fieldset key={i} className="mt-4">
@@ -72,6 +77,17 @@ export function PatientPanel({ state, instruments, refresh }: { state: Consultat
   const [saved, setSaved] = useState(false)
   const [support, setSupport] = useState<string | null>(null)
   const seeded = useRef(false)
+  const [tasks, setTasks] = useState<TaskRun[]>([])
+  const [running, setRunning] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (running) return // don't re-render the task host while a task is running
+    let live = true
+    const load = () => psychX.tasks(id).then((t) => { if (live) setTasks(t) }).catch(() => undefined)
+    load()
+    const t = setInterval(load, 4000)
+    return () => { live = false; clearInterval(t) }
+  }, [id, running])
 
   useEffect(() => {
     if (seeded.current || !state.intake) return
@@ -141,6 +157,25 @@ export function PatientPanel({ state, instruments, refresh }: { state: Consultat
             )
           })}
         </div>
+        {tasks.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <h3 className="text-sm font-semibold">Short activities</h3>
+            {tasks.map((t) => (
+              <div key={t.id} className="rounded-xl border p-3">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-sm font-medium">{t.name}</p><p className="text-xs text-slate-500">{t.status === 'assigned' ? 'Waiting for your psychologist to start it' : t.status === 'active' ? 'Ready' : 'Completed'}</p></div>
+                  {t.status === 'active' && running !== t.id && <button className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs text-white" onClick={() => setRunning(t.id)}>Start</button>}
+                  {t.status === 'completed' && <Check size={18} className="text-emerald-600" aria-label="Completed" />}
+                </div>
+                {running === t.id && (
+                  <div className="mt-2">
+                    <CognitiveTask task={t.task} onDone={async (trials) => { await psychX.submitTask(t.id, trials); setRunning(null); refresh() }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {support && <div role="alert" className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{support}</div>}
       </div>
       <p className="text-xs leading-relaxed text-slate-500">Screening questionnaires are not diagnoses. If you are in immediate danger, call 112.</p>

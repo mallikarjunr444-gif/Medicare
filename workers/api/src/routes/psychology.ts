@@ -14,7 +14,7 @@ let schemaReady: Promise<void> | null = null;
 export function ensurePsychSchema(q: (t: string, p?: unknown[]) => Promise<Record<string, any>[]>): Promise<void> {
   schemaReady ??= (async () => {
     const r = await q(
-      `SELECT to_regclass('public.psych_audit_log') IS NOT NULL AS t,
+      `SELECT to_regclass('public.psych_reports') IS NOT NULL AS t,
               EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_psychologist') AS c`);
     if (r[0]?.t === true && r[0]?.c === true) return;
     for (const stmt of PSYCH_SCHEMA) await q(stmt);
@@ -30,7 +30,7 @@ psychology.use("*", async (c, next) => {
 });
 
 type C = any;
-const CONSENT_KINDS = ["online_consultation", "assessment", "data_processing", "observer_questionnaire", "recording"] as const;
+export const CONSENT_KINDS = ["online_consultation", "assessment", "data_processing", "observer_questionnaire", "recording"] as const;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 
 export function isPsychologist(user: DbUser, env: Env): boolean {
@@ -40,25 +40,25 @@ export function isPsychologist(user: DbUser, env: Env): boolean {
   return list.includes(String(user.email).toLowerCase());
 }
 
-const rand = (alphabet: string, n: number) => {
+export const rand = (alphabet: string, n: number) => {
   const b = crypto.getRandomValues(new Uint8Array(n));
   return Array.from(b, (x) => alphabet[x % alphabet.length]).join("");
 };
 
 /** Append-only audit trail. Records ids and actions only, never answers or clinical text. */
-async function audit(c: C, consultationId: string | null, action: string, detail: Record<string, unknown> = {}) {
+export async function audit(c: C, consultationId: string | null, action: string, detail: Record<string, unknown> = {}) {
   await c.var.query(
     "INSERT INTO psych_audit_log (id, actor_id, consultation_id, action, detail) VALUES ($1,$2,$3,$4,$5::jsonb)",
     [crypto.randomUUID(), c.var.user.id, consultationId, action, JSON.stringify(detail)],
   );
 }
 
-function requirePsychologist(c: C) {
+export function requirePsychologist(c: C) {
   if (!isPsychologist(c.var.user, c.env)) fail(403, "Psychologist access required");
 }
 
 /** Loads a consultation and the caller's role in it. Non-participants get 404 (no existence leak). */
-async function loadConsultation(c: C, id: string) {
+export async function loadConsultation(c: C, id: string) {
   const row = (await c.var.query("SELECT * FROM psych_consultations WHERE id = $1", [id]))[0];
   const me = c.var.user.id;
   if (!row || (row.psychologist_id !== me && row.patient_id !== me)) fail(404, "Consultation not found");
@@ -93,7 +93,7 @@ const str = (v: unknown, max: number, field: string, errs: any[]): string | null
 psychology.get("/me", (c) => c.json({ is_psychologist: isPsychologist(c.var.user!, c.env) }));
 
 psychology.get("/instruments", (c) =>
-  c.json(Object.values(INSTRUMENTS).map((i) => ({ id: i.id, name: i.name, full_name: i.fullName, version: i.version, purpose: i.purpose, intro: i.intro, options: i.options, items: i.items, notice: i.notice }))),
+  c.json(Object.values(INSTRUMENTS).map((i) => ({ id: i.id, name: i.name, full_name: i.fullName, version: i.version, purpose: i.purpose, intro: i.intro, options: i.options, items: i.items, notice: i.notice, attribution: i.attribution ?? null }))),
 );
 
 // ---------- consultations ----------

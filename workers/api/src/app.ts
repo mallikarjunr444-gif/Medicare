@@ -16,6 +16,7 @@ import { messages } from "./routes/messages";
 import { sessions } from "./routes/sessions";
 import { users } from "./routes/users";
 import { psychology } from "./routes/psychology";
+import { psychClinical, psychObserver } from "./routes/psychClinical";
 
 const HEALTH_TIMEOUT_MS = 3000;
 
@@ -104,6 +105,8 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
   app.route("/api/v1/sessions", sessions);
   app.route("/api/v1/messages", messages);
   app.route("/api/v1/psych", psychology);
+  app.route("/api/v1/psych", psychClinical);
+  app.route("/api/v1/psych-observer", psychObserver);
 
   app.notFound((c) => c.json({ detail: "Not Found" }, 404));
 

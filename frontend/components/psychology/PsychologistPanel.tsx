@@ -95,6 +95,7 @@ export function PsychologistPanel({ state, instruments, refresh }: { state: Cons
               {r.total !== null ? <p>Score {r.total} · {r.label}</p> : <p>Screen: {r.screening} ({r.flags.shadedCount ?? 0} shaded responses)</p>}
               {r.flags.item9Positive && <p className="text-rose-700">Item 9 endorsed — clinical review needed.</p>}
               <p className="mt-1 text-xs text-slate-500">{r.notice}</p>
+              {instruments.find((i) => i.id === r.instrument)?.attribution && <p className="mt-1 text-[11px] text-slate-500">{instruments.find((i) => i.id === r.instrument)?.attribution}</p>}
               <details className="mt-1 text-xs"><summary className="cursor-pointer">Item answers</summary>
                 <ol className="mt-1 list-decimal pl-5">{Object.entries(r.answers).sort((a, b) => +a[0] - +b[0]).map(([k, v]) => <li key={k}>{v}</li>)}</ol>
               </details>

@@ -7,6 +7,7 @@ import { ensureIdentity, errorMessage, psych, signIn, type ConsultationState, ty
 import { JitsiPanel } from './JitsiPanel'
 import { PatientPanel } from './PatientPanel'
 import { PsychologistPanel } from './PsychologistPanel'
+import { ClinicianWorkspace } from './ClinicianWorkspace'
 
 export function PsychologyConsultation({ onExit }: { onExit: () => void }) {
   const [mode, setMode] = useState<'lobby' | 'room'>('lobby')
@@ -17,6 +18,7 @@ export function PsychologyConsultation({ onExit }: { onExit: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  const [panel, setPanel] = useState<'room' | 'workspace'>('room')
 
   const refresh = useCallback(async () => {
     if (!id) return
@@ -76,12 +78,24 @@ export function PsychologyConsultation({ onExit }: { onExit: () => void }) {
 
   if (!state) return <main className="p-8 text-sm text-slate-500">Loading consultation…</main>
   const name = state.role === 'psychologist' ? 'Psychologist' : state.intake?.preferred_name || 'Patient'
+  const isPsy = state.role === 'psychologist'
   return (
-    <main className="mx-auto grid max-w-7xl gap-4 p-4 lg:grid-cols-2">
-      <JitsiPanel room={state.room} displayName={name} onEnd={() => { setMode('lobby'); setState(null); setId(null) }} />
-      {state.role === 'psychologist'
-        ? <PsychologistPanel state={state} instruments={instruments} refresh={refresh} />
-        : <PatientPanel state={state} instruments={instruments} refresh={refresh} />}
+    <main className="mx-auto max-w-7xl p-4">
+      {isPsy && (
+        <div className="mb-3 flex gap-2 print:hidden" role="tablist" aria-label="Consultation view">
+          {(['room', 'workspace'] as const).map((p) => (
+            <button key={p} role="tab" aria-selected={panel === p} onClick={() => setPanel(p)} className={`rounded-xl border px-4 py-2 text-sm ${panel === p ? 'border-teal-700 bg-teal-50' : 'bg-white'}`}>{p === 'room' ? 'Consultation' : 'Psychologist workspace'}</button>
+          ))}
+        </div>
+      )}
+      {/* The video stays mounted while the psychologist uses the workspace, so the call is never dropped. */}
+      <div className={panel === 'workspace' ? 'hidden' : 'grid gap-4 lg:grid-cols-2'}>
+        <JitsiPanel room={state.room} displayName={name} onEnd={() => { setMode('lobby'); setState(null); setId(null); setPanel('room') }} />
+        {isPsy
+          ? <PsychologistPanel state={state} instruments={instruments} refresh={refresh} />
+          : <PatientPanel state={state} instruments={instruments} refresh={refresh} />}
+      </div>
+      {isPsy && panel === 'workspace' && <ClinicianWorkspace state={state} />}
     </main>
   )
 }
