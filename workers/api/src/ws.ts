@@ -179,27 +179,39 @@ async function streamWorkersAi(
   throw lastErr;
 }
 
+type OpenAiCfg = { base: string; key: string; model: string };
+
 /** Any OpenAI-compatible streaming endpoint (Groq, Gemini, OpenRouter…). */
-async function streamExternal(
-  env: Env,
+async function streamOpenAiCompatible(
+  cfg: OpenAiCfg,
   messages: Chat[],
-  language: string,
   onToken: (t: string) => void,
   signal: { aborted: boolean },
 ): Promise<string> {
-  const base = (env.AI_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "");
-  const model = (language === "kn" || language === "hi" ? env.AI_MODEL_LARGE_EXTERNAL : env.AI_MODEL_EXTERNAL) ||
-    env.AI_MODEL_EXTERNAL || "llama-3.3-70b-versatile";
-  const res = await fetch(`${base}/chat/completions`, {
+  const res = await fetch(`${cfg.base.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${env.AI_API_KEY}` },
-    body: JSON.stringify({ model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
+    headers: { "content-type": "application/json", authorization: `Bearer ${cfg.key}` },
+    body: JSON.stringify({ model: cfg.model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
   });
   if (!res.ok || !res.body) {
     const ra = Number(res.headers.get("retry-after"));
     throw new AiError(`external_ai_${res.status}`, res.status, Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined);
   }
   return readSse(res.body, onToken, signal);
+}
+
+async function streamExternal(env: Env, messages: Chat[], language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
+  const model = (language === "kn" || language === "hi" ? env.AI_MODEL_LARGE_EXTERNAL : env.AI_MODEL_EXTERNAL) ||
+    env.AI_MODEL_EXTERNAL || "llama-3.3-70b-versatile";
+  return streamOpenAiCompatible({ base: env.AI_BASE_URL || "https://api.groq.com/openai/v1", key: env.AI_API_KEY!, model }, messages, onToken, signal);
+}
+
+/** Optional second external provider (default OpenRouter), used only when the primary one has failed. */
+async function streamBackup(env: Env, messages: Chat[], _language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
+  return streamOpenAiCompatible({
+    base: env.AI_FALLBACK_BASE_URL || "https://openrouter.ai/api/v1", key: env.AI_FALLBACK_API_KEY!,
+    model: env.AI_FALLBACK_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
+  }, messages, onToken, signal);
 }
 
 /** Uses the external provider when configured (much larger free limits), with Workers AI as fallback. */
@@ -212,6 +224,7 @@ export async function streamAi(
 ): Promise<string> {
   const order: Array<typeof streamWorkersAi> = [];
   if (env.AI_API_KEY) order.push(streamExternal);
+  if (env.AI_FALLBACK_API_KEY) order.push(streamBackup);
   if (env.AI) order.push(streamWorkersAi);
   if (!order.length) throw new Error("ai_not_configured");
   const attempts = Math.max(1, Number(env.AI_MAX_ATTEMPTS) || 3);
@@ -223,7 +236,7 @@ export async function streamAi(
         return await provider(env, messages, language, (t) => ((emitted = true), onToken(t)), signal);
       } catch (e) {
         lastErr = e;
-        console.error("ai_provider_failed", provider === streamExternal ? "external" : "workers_ai", attempt, String((e as Error).message).slice(0, 160));
+        console.error("ai_provider_failed", provider === streamExternal ? "external" : provider === streamBackup ? "backup" : "workers_ai", attempt, String((e as Error).message).slice(0, 160));
         if (emitted || signal.aborted) throw e; // never retry/switch providers mid-reply
         if (classifyAiError(e) !== "transient" || attempt === attempts) break;
         const base = Math.min(4000, 400 * 2 ** (attempt - 1));

@@ -17,6 +17,10 @@ export interface Env {
   // Optional OpenAI-compatible provider (Groq/Gemini/OpenRouter free tiers): larger limits than Workers AI.
   AI_API_KEY?: string;
   AI_BASE_URL?: string;
+  /** Optional backup provider (OpenAI-compatible; defaults to OpenRouter). */
+  AI_FALLBACK_API_KEY?: string;
+  AI_FALLBACK_BASE_URL?: string;
+  AI_FALLBACK_MODEL?: string;
   AI_MODEL_EXTERNAL?: string;
   AI_MODEL_LARGE_EXTERNAL?: string;
   AI_MAX_ATTEMPTS?: string;

@@ -47,3 +47,13 @@ If synthesis fails or takes over 7 s, the browser's own voice is used and a sing
 
 Without a Gemini key, `auto` uses the keyless Google Translate speech endpoint. It is **unofficial**, may be rate-limited or blocked,
 and has a single voice. Set `GEMINI_API_KEY` for the supported path.
+
+
+## Backup AI provider (optional)
+Order is: primary external provider (`AI_API_KEY`) -> backup provider (`AI_FALLBACK_API_KEY`) -> Workers AI. A provider is only skipped before the first token of a reply, never mid-reply.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `AI_FALLBACK_API_KEY` (secret) | Key for the backup OpenAI-compatible provider | unset = backup disabled |
+| `AI_FALLBACK_BASE_URL` | Backup base URL | `https://openrouter.ai/api/v1` |
+| `AI_FALLBACK_MODEL` | Backup model id | `meta-llama/llama-3.3-70b-instruct:free` (free models change; set this if it stops working) |

@@ -103,6 +103,23 @@ describe("provider order", () => {
       globalThis.fetch = orig;
     }
   });
+  it("uses the backup provider (OpenRouter by default) when the primary fails, before Workers AI", async () => {
+    const orig = globalThis.fetch; const urls: string[] = []; const auth: string[] = [];
+    const ai = { run: async () => sse(['data: {"response":"CF"}', "data: [DONE]"]) };
+    try {
+      globalThis.fetch = (async (u: string, init: any) => { urls.push(u); auth.push(init.headers.authorization); return u.includes("groq") ? new Response("busy", { status: 503 }) : ok(["Open", "Router"]); }) as any;
+      const env: any = { AI_API_KEY: "primary", AI_FALLBACK_API_KEY: "backup", AI: ai, AI_RETRY_DELAY_MS: "0", AI_MAX_ATTEMPTS: "2" };
+      expect(await streamAi(env, [], "hi", () => {}, { aborted: false })).toBe("OpenRouter");
+      expect(urls.at(-1)).toBe("https://openrouter.ai/api/v1/chat/completions");
+      expect(auth.at(-1)).toBe("Bearer backup");
+      expect(urls.filter((u) => u.includes("groq"))).toHaveLength(2); // primary retried, then switched
+      // everything external failing still ends at Workers AI
+      globalThis.fetch = (async () => new Response("x", { status: 429 })) as any;
+      expect(await streamAi(env, [], "en", () => {}, { aborted: false })).toBe("CF");
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
   it("uses an OpenAI-compatible Workers AI-less setup and errors when nothing is configured", async () => {
     await expect(streamAi({} as any, [], "en", () => {}, { aborted: false })).rejects.toThrow("ai_not_configured");
   });
