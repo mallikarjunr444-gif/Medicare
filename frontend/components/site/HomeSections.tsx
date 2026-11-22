@@ -3,13 +3,21 @@
 import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react'
-import { Activity, FileText, Pill, ShieldAlert } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { Activity, FileText, Pill, ShieldAlert, Square, Volume2 } from 'lucide-react'
 import { MotionButton } from '@/components/ui/motion-button'
 import { TextWordCarousel } from '@/components/ui/text-word-carousel'
 import { TiltSpotlightCard } from '@/components/ui/tilt-spotlight-card'
 import { Reveal } from '@/components/ui/reveal'
 import { DOCTORS } from '@/lib/doctorTypes'
 import type { DoctorId } from '@/lib/doctorTypes'
+import { lineText, speakLine, stopSpeaking, type LandingLang } from '@/lib/landingVoice'
+
+// The animated portrait (blinking, head movement, lip-sync) is canvas code, so it loads on the client only.
+const PhotorealisticDigitalHuman = dynamic(
+  () => import('@/components/doctor/PhotorealisticDigitalHuman').then((m) => m.PhotorealisticDigitalHuman),
+  { ssr: false },
+)
 
 /* ───────────────────────── shared pieces ───────────────────────── */
 
@@ -38,27 +46,51 @@ function TextLink({ href, children }: { href: string; children: React.ReactNode 
 /* ───────────────────────── hero ───────────────────────── */
 
 // The same greeting, as the doctor would say it in each language.
-const GREETINGS = [
-  { lang: 'ಕನ್ನಡ', text: 'ನಮಸ್ಕಾರ, ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?' },
-  { lang: 'हिन्दी', text: 'नमस्ते, आज मैं आपकी कैसे मदद कर सकती हूँ?' },
-  { lang: 'English', text: 'Hello, how can I help you today?' },
+const GREETINGS: { lang: string; code: LandingLang }[] = [
+  { lang: 'ಕನ್ನಡ', code: 'kn' },
+  { lang: 'हिन्दी', code: 'hi' },
+  { lang: 'English', code: 'en' },
 ]
 
 export function Hero({ onStart }: { onStart: () => void }) {
   const [index, setIndex] = useState(0)
+  const [speaking, setSpeaking] = useState(false)
+  const [voiceNote, setVoiceNote] = useState('')
+  const reduce = useReducedMotion()
 
-  // The one moving thing on the page: the example reply changes language every few seconds.
+  // The example reply changes language every few seconds, except while the doctor is speaking.
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (reduce || speaking) return
     const timer = window.setInterval(() => setIndex((i) => (i + 1) % GREETINGS.length), 4500)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [reduce, speaking])
+
+  // Never leave a voice running after the visitor scrolls on to another page.
+  useEffect(() => () => stopSpeaking(), [])
 
   const greeting = GREETINGS[index]
-  const reduce = useReducedMotion()
+  const text = lineText('greet', greeting.code)
+
+  const toggleVoice = () => {
+    if (speaking) {
+      stopSpeaking()
+      return
+    }
+    setVoiceNote('')
+    setSpeaking(true)
+    speakLine('greet', greeting.code, {
+      onEnd: () => setSpeaking(false),
+      onNoVoice: (reason) =>
+        setVoiceNote(
+          reason === 'unsupported'
+            ? 'This browser cannot play speech. The greeting is shown as captions.'
+            : `This device has no ${greeting.code === 'kn' ? 'Kannada' : 'Hindi'} voice installed. Add one in your device's text-to-speech settings, or switch the greeting to English.`,
+        ),
+    })
+  }
+
   const figureRef = useRef<HTMLElement>(null)
   const { scrollYProgress } = useScroll({ target: figureRef, offset: ['start end', 'end start'] })
-  const imageY = useTransform(scrollYProgress, [0, 1], reduce ? ['0%', '0%'] : ['-6%', '6%'])
   const figureScale = useTransform(scrollYProgress, [0, 0.35], reduce ? [1, 1] : [0.94, 1])
 
   return (
@@ -96,26 +128,46 @@ export function Hero({ onStart }: { onStart: () => void }) {
 
       <div className="mx-auto mt-12 max-w-[1240px] px-3 sm:mt-16 sm:px-5">
         <motion.figure ref={figureRef} style={{ scale: figureScale }} className="relative aspect-[4/5] overflow-hidden rounded-[28px] bg-[#f5f5f7] shadow-[0_40px_80px_-30px_rgba(0,0,0,0.35)] sm:aspect-[16/9] lg:aspect-[2/1]">
-          <motion.div style={{ y: imageY, scale: 1.14 }} className="absolute inset-0">
-            <Image
-              src="/doctor/dr_ananya.jpg"
-              alt="Dr. Ananya, an AI physician, on a video consultation"
-              fill
-              priority
-              sizes="(max-width: 1240px) 100vw, 1240px"
-              className="object-cover object-[48%_20%]"
-            />
-          </motion.div>
-          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/45 to-transparent" aria-hidden="true" />
-          <figcaption className="absolute inset-x-4 bottom-5 flex justify-center sm:bottom-8">
+          {/* The still photo shows instantly; the living portrait paints over it once it is ready. */}
+          <Image
+            src="/doctor/dr_ananya.jpg"
+            alt={reduce ? 'Dr. Ananya, an AI physician, on a video consultation' : ''}
+            fill
+            priority
+            sizes="(max-width: 1240px) 100vw, 1240px"
+            className="object-cover object-[48%_20%]"
+          />
+          {!reduce && (
+            <div aria-hidden="true" className="absolute inset-0">
+              <PhotorealisticDigitalHuman
+                doctorId="dr_ananya"
+                doctorState={speaking ? 'speaking' : 'listening'}
+                expression="warm"
+                className="!bg-transparent"
+              />
+            </div>
+          )}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/45 to-transparent" aria-hidden="true" />
+
+          <button
+            type="button"
+            onClick={toggleVoice}
+            aria-pressed={speaking}
+            className="absolute right-4 top-4 z-30 inline-flex h-11 items-center gap-2 rounded-full bg-white/90 px-4 text-[15px] font-semibold text-[#1d1d1f] shadow-lg backdrop-blur-md transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/40 sm:right-6 sm:top-6"
+          >
+            {speaking ? <Square size={16} aria-hidden="true" /> : <Volume2 size={18} aria-hidden="true" />}
+            {speaking ? 'Stop' : `Hear Dr. Ananya in ${greeting.lang}`}
+          </button>
+
+          <figcaption className="absolute inset-x-4 bottom-5 z-20 flex flex-col items-center gap-2 sm:bottom-8">
             <p
               key={greeting.lang}
-              aria-hidden="true"
+              aria-live={speaking ? 'polite' : 'off'}
               className="max-w-[640px] animate-fade-in rounded-2xl bg-black/70 px-5 py-3 text-center text-[17px] font-semibold leading-[1.6] text-white backdrop-blur-md sm:text-[22px]"
             >
-              {greeting.text}
+              {text}
             </p>
-            <span className="sr-only">An example reply from Dr. Ananya, shown in Kannada, Hindi and English.</span>
+            {voiceNote && <p role="status" className="max-w-[560px] rounded-xl bg-white/90 px-4 py-2 text-[14px] leading-snug text-[#1d1d1f]">{voiceNote}</p>}
           </figcaption>
         </motion.figure>
       </div>
