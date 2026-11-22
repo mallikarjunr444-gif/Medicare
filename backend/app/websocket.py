@@ -80,6 +80,11 @@ _MIN_FIRST_CHUNK_LEN = 32  # start after a useful phrase, not only after a greet
 # for a boundary that may never come.
 _MAX_CHUNK_CHARS = 160
 
+# Optional reference lookups run BEFORE the model starts answering, so each one adds directly to
+# the patient's wait. Give them a short budget and answer without them if they are slow.
+_QUERY_TRANSLATION_TIMEOUT_S = float(os.getenv("QUERY_TRANSLATION_TIMEOUT_S", "2.0"))
+_PUBMED_TIMEOUT_S = float(os.getenv("PUBMED_TIMEOUT_S", "2.0"))
+
 # Boundary regexes. Lookbehind keeps the punctuation attached to the chunk
 # (better TTS prosody than trailing a bare clause).
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -916,7 +921,7 @@ class ConnectionManager:
                 if indic_script:
                     retrieval_query = None
                     try:
-                        expanded_query = await llm_service.generate_response(
+                        expanded_query = await asyncio.wait_for(llm_service.generate_response(
                             [{"role": "user", "content": (
                                 "Translate the following Kannada or Hindi health question into a short "
                                 "English search query. Return only the query terms, preserving medical "
@@ -924,7 +929,7 @@ class ConnectionManager:
                                 "talk, or not about health, return exactly NONE.\n\n" + text
                             )}],
                             system_prompt="You translate search queries. Return at most 12 English words, or NONE.",
-                        )
+                        ), timeout=_QUERY_TRANSLATION_TIMEOUT_S)
                         candidate = expanded_query.strip().strip("\"'. ")
                         if candidate and candidate.upper() != "NONE":
                             retrieval_query = candidate
@@ -955,7 +960,14 @@ class ConnectionManager:
                 # same response that is streamed to text, speech, and avatar.
                 from app.services.medical_web_research import format_references, search_pubmed
 
-                web_references = await search_pubmed(retrieval_query) if retrieval_query else []
+                web_references = []
+                if retrieval_query:
+                    try:
+                        web_references = await asyncio.wait_for(
+                            search_pubmed(retrieval_query), timeout=_PUBMED_TIMEOUT_S
+                        )
+                    except (asyncio.TimeoutError, Exception) as exc:
+                        logger.info("PubMed lookup skipped (%s); answering without it", type(exc).__name__)
                 if web_references:
                     system_prompt = (system_prompt or "") + format_references(web_references)
 
