@@ -21,8 +21,11 @@ appropriate user-facing messages.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
-from typing import AsyncGenerator, Dict, List, Optional
+import time
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import anthropic
 import openai
@@ -100,34 +103,55 @@ def _map_openai_exception(exc: Exception) -> LLMError:
 class LLMService:
     """LLM Service for AI responses."""
 
-    def __init__(self):
-        self.provider = settings.LLM_PROVIDER
-        self.model = settings.LLM_MODEL
+    def __init__(self, spec: Optional[Dict[str, Any]] = None):
+        """Build the main backend, or (with `spec`) one backup backend.
+
+        `spec` keys: provider, model, api_key, base_url. A backup never has its
+        own backups, and does not inherit the main backend's base URL.
+        """
+        is_backup = spec is not None
+        spec = spec or {}
+        self.provider = spec.get("provider") or settings.LLM_PROVIDER
+        self.model = spec.get("model") or settings.LLM_MODEL
         self.temperature = settings.LLM_TEMPERATURE
         self.max_tokens = settings.LLM_MAX_TOKENS
         # Opt-in reasoning cap for OpenAI-compatible "thinking" models (e.g.
         # Ollama cloud glm-*:cloud / kimi-*:cloud). "none" disables reasoning
         # so they return normal `content`. Empty → not sent (default behavior).
         self.reasoning_effort = settings.LLM_REASONING_EFFORT or None
+        self.fallbacks: List["LLMService"] = [] if is_backup else self._build_fallbacks()
+        self._down_until = 0.0
+
+        # With a backup available, fail fast (no SDK back-off retries) and let
+        # the failover loop switch instead.
+        client_opts: Dict[str, Any] = {"timeout": settings.LLM_REQUEST_TIMEOUT_S}
+        if self.fallbacks:
+            client_opts["max_retries"] = 0
 
         if self.provider == "anthropic":
-            self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.client = anthropic.AsyncAnthropic(
+                api_key=spec.get("api_key") or settings.ANTHROPIC_API_KEY, **client_opts
+            )
         elif self.provider == "ollama":
             # Ollama (and vLLM / LM Studio / OpenRouter) speak the OpenAI
             # wire protocol — reuse the OpenAI client against their base URL.
             # Fully local and free; no API key required (the client insists
             # on a non-empty string, so we pass a placeholder).
-            base_url = settings.OPENAI_BASE_URL or "http://localhost:11434/v1"
+            configured_url = spec.get("base_url") if is_backup else settings.OPENAI_BASE_URL
+            base_url = configured_url or "http://localhost:11434/v1"
             self.client = openai.AsyncOpenAI(
-                api_key=settings.OPENAI_API_KEY or "ollama",
+                api_key=spec.get("api_key") or settings.OPENAI_API_KEY or "ollama",
                 base_url=base_url,
+                **client_opts,
             )
             self.provider = "openai"  # downstream code paths are identical
             logger.info(f"LLM provider 'ollama' → OpenAI-compatible client at {base_url}")
         elif self.provider == "openai":
             self.client = openai.AsyncOpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.OPENAI_BASE_URL,  # None → api.openai.com
+                api_key=spec.get("api_key") or settings.OPENAI_API_KEY,
+                # None → api.openai.com
+                base_url=spec.get("base_url") if is_backup else settings.OPENAI_BASE_URL,
+                **client_opts,
             )
         else:
             # Fail here rather than leaving `self.client` unset. Without this a
@@ -139,9 +163,79 @@ class LLMService:
                 f"Expected one of: anthropic, openai, ollama."
             )
 
+    @staticmethod
+    def _build_fallbacks() -> List["LLMService"]:
+        """Backup backends from LLM_FALLBACK_* and LLM_FALLBACKS. Bad entries are skipped."""
+        specs: List[Dict[str, Any]] = []
+        if settings.LLM_FALLBACK_PROVIDER and settings.LLM_FALLBACK_MODEL:
+            specs.append({
+                "provider": settings.LLM_FALLBACK_PROVIDER,
+                "model": settings.LLM_FALLBACK_MODEL,
+                "base_url": settings.LLM_FALLBACK_BASE_URL,
+                "api_key": settings.LLM_FALLBACK_API_KEY,
+            })
+        if settings.LLM_FALLBACKS.strip():
+            try:
+                extra = json.loads(settings.LLM_FALLBACKS)
+                specs.extend(item for item in extra if isinstance(item, dict))
+            except (ValueError, TypeError):
+                logger.warning("LLM_FALLBACKS is not valid JSON; ignoring it")
+
+        backups: List[LLMService] = []
+        for spec in specs:
+            try:
+                backups.append(LLMService(spec))
+            except LLMError as exc:
+                logger.warning("Skipping LLM backup %r: %s", spec.get("model"), exc)
+        if backups:
+            logger.info("LLM failover chain: main + %s", [b.model for b in backups])
+        return backups
+
+    # ── failover ─────────────────────────────────────────────────────────────
+
+    def _chain(self) -> List["LLMService"]:
+        """Main backend then backups, leaving out any that failed recently."""
+        backends = [self, *getattr(self, "fallbacks", [])]
+        now = time.monotonic()
+        healthy = [b for b in backends if getattr(b, "_down_until", 0.0) <= now]
+        return healthy or backends  # everything cooling down: try them all anyway
+
+    def _mark_down(self) -> None:
+        self._down_until = time.monotonic() + settings.LLM_BACKEND_COOLDOWN_S
+
+    def _mark_ok(self) -> None:
+        self._down_until = 0.0
+
     # ── non-streaming ────────────────────────────────────────────────────────
 
     async def generate_response(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        thinking: bool = False,
+    ) -> str:
+        """One reply, switching to a backup model if the current one fails or is too slow."""
+        last_error: Optional[Exception] = None
+        for backend in self._chain():
+            try:
+                text = await asyncio.wait_for(
+                    backend._generate_single(messages, system_prompt, thinking),
+                    timeout=settings.LLM_REQUEST_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                last_error = LLMUnavailable(f"{backend.model} did not answer in time")
+            except LLMError as exc:
+                last_error = exc
+            except Exception as exc:  # defensive: never let one backend end the turn
+                last_error = LLMError(str(exc))
+            else:
+                backend._mark_ok()
+                return text
+            backend._mark_down()
+            logger.warning("LLM backend %s failed (%s); trying the next", backend.model, last_error)
+        raise last_error or LLMUnavailable("No LLM backend available")
+
+    async def _generate_single(
         self,
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
@@ -233,6 +327,55 @@ class LLMService:
     # ── streaming ────────────────────────────────────────────────────────────
 
     async def stream_response(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a reply, switching to a backup model if the current one fails or stays silent.
+
+        Switching is only possible before the first words are sent. Once words have
+        reached the patient the reply cannot be restarted elsewhere, so a failure after
+        that point is raised as before.
+        """
+        chain = self._chain()
+        last_error: Optional[Exception] = None
+        for position, backend in enumerate(chain):
+            is_last = position == len(chain) - 1
+            stream = backend._stream_single(messages, system_prompt)
+            try:
+                first = await asyncio.wait_for(
+                    stream.__anext__(),
+                    timeout=None if is_last else settings.LLM_FIRST_TOKEN_TIMEOUT_S,
+                )
+            except StopAsyncIteration:
+                if is_last:
+                    return  # nothing left to try: an empty reply, as before
+                last_error = LLMUnavailable(f"{backend.model} returned an empty reply")
+            except asyncio.TimeoutError:
+                last_error = LLMUnavailable(f"{backend.model} sent nothing within the time limit")
+            except Exception as exc:
+                last_error = exc
+            else:
+                try:
+                    yield first
+                    async for token in stream:
+                        yield token
+                except Exception:
+                    backend._mark_down()  # failed after words were sent: cannot restart elsewhere
+                    raise
+                backend._mark_ok()
+                return
+            try:
+                await stream.aclose()
+            except Exception:
+                pass
+            backend._mark_down()
+            logger.warning("LLM backend %s failed (%s); trying the next", backend.model, last_error)
+        if isinstance(last_error, LLMError):
+            raise last_error
+        raise LLMUnavailable(str(last_error) if last_error else "No LLM backend available")
+
+    async def _stream_single(
         self,
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
