@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Square, Volume2 } from 'lucide-react'
 import { DOCTORS } from '@/lib/doctorTypes'
 import type { DoctorId } from '@/lib/doctorTypes'
 import { Reveal } from '@/components/ui/reveal'
+import { lineText, speakLine, stopSpeaking, type LandingLang } from '@/lib/landingVoice'
+import { mouthChannel } from '@/lib/visemes'
 
 const H2 = 'text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] text-[#1d1d1f] sm:text-[48px] lg:text-[56px]'
 
@@ -158,15 +160,65 @@ export function HighlightsGallery() {
 
 /* ───────────────── language viewer (tabs) ───────────────── */
 
-const EXAMPLES = [
-  { id: 'kn', tab: 'ಕನ್ನಡ', name: 'Kannada', you: 'ನನಗೆ ಮೂರು ದಿನಗಳಿಂದ ತಲೆನೋವು ಇದೆ.', doctor: 'ನಿಮಗೆ ನೋವಾಗುತ್ತಿರುವುದು ಕೇಳಿ ಬೇಸರವಾಯಿತು. ನೋವು ತಲೆಯ ಒಂದು ಬದಿಯಲ್ಲಿದೆಯೇ, ವಾಕರಿಕೆ ಕೂಡ ಇದೆಯೇ?' },
-  { id: 'hi', tab: 'हिन्दी', name: 'Hindi', you: 'मुझे तीन दिन से सिरदर्द है।', doctor: 'आपको तकलीफ़ हो रही है, यह जानकर दुख हुआ। क्या दर्द सिर के एक तरफ़ है, और क्या मितली भी आ रही है?' },
-  { id: 'en', tab: 'English', name: 'English', you: 'I have had a headache for three days.', doctor: 'I am sorry you are in pain. Is it on one side of your head, and do you feel any nausea?' },
+const EXAMPLES: { id: LandingLang; tab: string; name: string; you: string }[] = [
+  { id: 'kn', tab: 'ಕನ್ನಡ', name: 'Kannada', you: 'ನನಗೆ ಮೂರು ದಿನಗಳಿಂದ ತಲೆನೋವು ಇದೆ.' },
+  { id: 'hi', tab: 'हिन्दी', name: 'Hindi', you: 'मुझे तीन दिन से सिरदर्द है।' },
+  { id: 'en', tab: 'English', name: 'English', you: 'I have had a headache for three days.' },
 ]
+
+/** Four bars that rise and fall with the mouth while the doctor speaks. */
+function VoiceBars({ active }: { active: boolean }) {
+  const barsRef = useRef<(HTMLSpanElement | null)[]>([])
+  useEffect(() => {
+    if (!active) return
+    let raf = 0
+    const tick = (now: number) => {
+      const level = mouthChannel.active ? mouthChannel.open : 0.5 + Math.sin(now / 160) * 0.3
+      barsRef.current.forEach((bar, i) => {
+        if (bar) bar.style.transform = `scaleY(${(0.25 + level * (0.55 + 0.45 * Math.sin(now / 110 + i * 1.7) ** 2)).toFixed(2)})`
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [active])
+  return (
+    <span aria-hidden="true" className="flex h-6 items-center gap-[3px]">
+      {[0, 1, 2, 3].map((i) => (
+        <span key={i} ref={(el) => { barsRef.current[i] = el }} className={`h-full w-[3px] origin-center rounded-full bg-[#2997ff] ${active ? '' : 'scale-y-[0.25] opacity-40'}`} />
+      ))}
+    </span>
+  )
+}
 
 export function LanguageViewer({ onStart }: { onStart: () => void }) {
   const [current, setCurrent] = useState(0)
+  const [speaking, setSpeaking] = useState(false)
+  const [voiceNote, setVoiceNote] = useState('')
   const example = EXAMPLES[current]
+  const reply = lineText('reply', example.id)
+
+  const play = useCallback((lang: LandingLang) => {
+    setVoiceNote('')
+    setSpeaking(true)
+    speakLine('reply', lang, {
+      onEnd: () => setSpeaking(false),
+      onNoVoice: (reason) =>
+        setVoiceNote(
+          reason === 'unsupported'
+            ? 'This browser cannot play speech, so the reply is shown as text only.'
+            : `This device has no ${lang === 'kn' ? 'Kannada' : 'Hindi'} voice installed. Add one in your device's text-to-speech settings to hear the reply.`,
+        ),
+    })
+  }, [])
+
+  // Choosing a language is a tap, so the browser allows the doctor to answer aloud straight away.
+  const choose = (index: number) => {
+    setCurrent(index)
+    play(EXAMPLES[index].id)
+  }
+
+  useEffect(() => () => stopSpeaking(), [])
 
   return (
     <section id="languages" className="scroll-mt-24 bg-black px-5 py-24 sm:py-32">
@@ -177,15 +229,35 @@ export function LanguageViewer({ onStart }: { onStart: () => void }) {
 
       <div className="mx-auto mt-12 flex max-w-[360px] justify-center gap-1 rounded-full bg-[#1d1d1f] p-1" role="tablist" aria-label="Example language">
         {EXAMPLES.map((e, i) => (
-          <button key={e.id} type="button" role="tab" aria-selected={current === i} onClick={() => setCurrent(i)} className={`h-10 flex-1 rounded-full px-4 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2997ff]/40 ${current === i ? 'bg-[#f5f5f7] font-semibold text-[#1d1d1f]' : 'text-[#a1a1a6] hover:text-white'}`}>
+          <button key={e.id} type="button" role="tab" aria-selected={current === i} onClick={() => choose(i)} className={`h-10 flex-1 rounded-full px-4 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2997ff]/40 ${current === i ? 'bg-[#f5f5f7] font-semibold text-[#1d1d1f]' : 'text-[#a1a1a6] hover:text-white'}`}>
             {e.tab}
           </button>
         ))}
       </div>
+      <p className="mt-3 text-center text-[13px] text-[#86868b]">Tap a language to hear Dr. Ananya reply.</p>
 
-      <div role="tabpanel" aria-label={`${example.name} example`} className="mx-auto mt-10 max-w-[720px] space-y-4">
+      <div role="tabpanel" aria-label={`${example.name} example`} className="mx-auto mt-8 max-w-[720px] space-y-4">
         <p className="ml-auto w-fit max-w-[88%] rounded-[22px] rounded-br-md bg-[#0071e3] px-5 py-3.5 text-[19px] leading-[1.6] text-white sm:text-[22px]">{example.you}</p>
-        <p className="w-fit max-w-[92%] rounded-[22px] rounded-bl-md bg-[#1d1d1f] px-5 py-3.5 text-[19px] leading-[1.6] text-[#f5f5f7] sm:text-[22px]">{example.doctor}</p>
+        <div className="flex items-end gap-3">
+          <span className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-full ring-2 transition-shadow ${speaking ? 'ring-[#2997ff] shadow-[0_0_0_6px_rgba(41,151,255,0.25)]' : 'ring-white/20'}`}>
+            <Image src="/doctor/dr_ananya.jpg" alt="Dr. Ananya" fill sizes="44px" className="object-cover object-[50%_18%]" />
+          </span>
+          <div className={`w-fit max-w-[88%] rounded-[22px] rounded-bl-md bg-[#1d1d1f] px-5 py-3.5 transition-shadow ${speaking ? 'shadow-[0_0_0_2px_rgba(41,151,255,0.6)]' : ''}`}>
+            <p aria-live="polite" className="text-[19px] leading-[1.6] text-[#f5f5f7] sm:text-[22px]">{reply}</p>
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => (speaking ? stopSpeaking() : play(example.id))}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/10 px-3 text-[13px] text-[#f5f5f7] transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2997ff]/40"
+              >
+                {speaking ? <Square size={13} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+                {speaking ? 'Stop' : `Play in ${example.name}`}
+              </button>
+              <VoiceBars active={speaking} />
+            </div>
+          </div>
+        </div>
+        {voiceNote && <p role="status" className="mx-auto max-w-[560px] text-center text-[14px] leading-snug text-[#f5a623]">{voiceNote}</p>}
         <p className="pt-2 text-center text-[13px] text-[#86868b]">An example conversation, shown in {example.name}.</p>
       </div>
 
