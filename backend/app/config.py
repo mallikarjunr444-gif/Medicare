@@ -69,6 +69,26 @@ class Settings(BaseSettings):
     # (non-reasoning) models so nothing is sent.
     LLM_REASONING_EFFORT: str = ""
 
+    # ── Automatic failover between AI models ─────────────────────────────────
+    # If the main model errors, is rate-limited, or sends nothing within
+    # LLM_FIRST_TOKEN_TIMEOUT_S, the turn is retried on the next backup, so a
+    # patient is never left waiting on one provider. Configure one backup with
+    # the four LLM_FALLBACK_* values, and/or several with LLM_FALLBACKS (a JSON
+    # list such as '[{"provider":"openai","model":"gpt-4o-mini"}]'; each item
+    # accepts provider, model, api_key, base_url). Backups are optional.
+    LLM_FALLBACK_PROVIDER: str = ""  # anthropic, openai, ollama
+    LLM_FALLBACK_MODEL: str = ""
+    LLM_FALLBACK_BASE_URL: Optional[str] = None
+    LLM_FALLBACK_API_KEY: str = ""
+    LLM_FALLBACKS: str = ""
+    # Seconds to wait for the first words before switching to the next backup.
+    LLM_FIRST_TOKEN_TIMEOUT_S: float = 8.0
+    # Overall limit for one non-streaming call.
+    LLM_REQUEST_TIMEOUT_S: float = 20.0
+    # After a backend fails, skip it for this long so later turns go straight
+    # to a working one instead of waiting on it again.
+    LLM_BACKEND_COOLDOWN_S: float = 30.0
+
     # Face restoration (optional, GPU only).
     #
     # MuseTalk regenerates the mouth region at 256x256 and the worker scales it
