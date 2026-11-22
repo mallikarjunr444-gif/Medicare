@@ -251,6 +251,20 @@ export function useDoctorSpeech({
     }, 400)
   }, [onStateChange])
 
+  /** Silence the device voice without changing the doctor's state (used when server audio takes over). */
+  const cancelLocalSpeech = useCallback(() => {
+    if (!activeUtteranceRef.current && !synthRef.current?.speaking) return
+    lipSyncRef.current?.stop()
+    synthRef.current?.cancel()
+    activeUtteranceRef.current = null
+    if (animIntervalRef.current) clearInterval(animIntervalRef.current)
+    animIntervalRef.current = null
+    if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current)
+    watchdogTimerRef.current = null
+    setIsSpeaking(false)
+    setAudioLevel(0)
+  }, [])
+
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => !prev)
   }, [])
@@ -261,6 +275,7 @@ export function useDoctorSpeech({
     isMuted,
     subtitles,
     speak,
+    cancelLocalSpeech,
     interrupt,
     toggleMute,
     setSubtitles,

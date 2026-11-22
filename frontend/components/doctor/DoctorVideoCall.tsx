@@ -128,6 +128,10 @@ export function DoctorVideoCall({
   const audioObjectUrlRef = useRef<string | null>(null)
   const audioQueueRef = useRef<Array<{ url: string; text: string; chunkIndex: number }>>([])
   const audioStreamEndedRef = useRef(false)
+  // The server sends the reply text before its voice clips are ready. Speak with the device voice only
+  // once the turn ends with no server audio at all; otherwise the doctor's voice plays twice.
+  const turnHadServerAudioRef = useRef(false)
+  const pendingDeviceSpeechRef = useRef<string | null>(null)
   // Tokens are useful live subtitles until the first generated audio starts.
   // After that point, keep subtitles on the exact audio chunk being played so
   // the caption does not run ahead of the doctor's voice.
@@ -178,6 +182,8 @@ export function DoctorVideoCall({
     audioQueueRef.current.forEach(({ url }) => URL.revokeObjectURL(url))
     audioQueueRef.current = []
     audioStreamEndedRef.current = false
+    turnHadServerAudioRef.current = false
+    pendingDeviceSpeechRef.current = null
     responseAudioStartedRef.current = false
     currentVideoChunkIndexRef.current = null
     setHasSeparateTtsAudio(false)
@@ -198,6 +204,7 @@ export function DoctorVideoCall({
     isMuted,
     subtitles,
     speak,
+    cancelLocalSpeech,
     interrupt,
     toggleMute,
     setSubtitles,
@@ -318,14 +325,21 @@ export function DoctorVideoCall({
           streamedDoctorTextRef.current = ''
           if (triage) setActiveTriage(triage)
           pendingClinicalMetaRef.current = null
-          // No server-generated voice (free hosting): speak with the device's
-          // own voice (e.g. Kannada on Android) and drive the avatar from it.
-          if (!responseAudioStartedRef.current && audioQueueRef.current.length === 0 && !doctorVideoActiveRef.current) {
+          // Server voice clips usually arrive just after this text. Hold the device-voice fallback
+          // (e.g. Kannada on Android with no server TTS) until the turn ends without any server audio.
+          if (turnHadServerAudioRef.current || responseAudioStartedRef.current || doctorVideoActiveRef.current) {
+            pendingDeviceSpeechRef.current = null
+          } else if (audioStreamEndedRef.current) {
             speak(event.content)
+          } else {
+            pendingDeviceSpeechRef.current = event.content
           }
         }
         break
       case 'audio_chunk': {
+        turnHadServerAudioRef.current = true
+        pendingDeviceSpeechRef.current = null
+        cancelLocalSpeech()
         const binary = window.atob(event.audio_data)
         const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
         const objectUrl = URL.createObjectURL(new Blob([bytes], { type: event.mime_type }))
@@ -339,6 +353,11 @@ export function DoctorVideoCall({
         // No video renderer is attached on free hosting: the audio itself drives the lips (Web Audio analyser).
         if (!doctorVideoActiveRef.current) setIsRenderingLipSync(false)
         audioStreamEndedRef.current = true
+        if (pendingDeviceSpeechRef.current && !turnHadServerAudioRef.current && !doctorVideoActiveRef.current) {
+          const fallbackText = pendingDeviceSpeechRef.current
+          pendingDeviceSpeechRef.current = null
+          speak(fallbackText)
+        }
         startNextAudioRef.current()
         break
       case 'audio_error':
@@ -438,7 +457,7 @@ export function DoctorVideoCall({
       case 'pong':
         break
     }
-  }, [doctorId, hasSeparateTtsAudio, setSubtitles, pauseVoiceInput, resumeVoiceInput, clearDoctorAudio, speak])
+  }, [doctorId, hasSeparateTtsAudio, setSubtitles, pauseVoiceInput, resumeVoiceInput, clearDoctorAudio, speak, cancelLocalSpeech])
 
   const doctorBackend = useDoctorBackendSession(handleDoctorBackendEvent)
   const {
@@ -640,6 +659,11 @@ export function DoctorVideoCall({
         warningSign: result.warningSign,
         actionCard: result.actionCard as ActionCardData | undefined,
       }
+
+      // New turn: forget the previous turn's audio bookkeeping so stale flags cannot cut this reply short.
+      audioStreamEndedRef.current = false
+      turnHadServerAudioRef.current = false
+      pendingDeviceSpeechRef.current = null
 
       // The backend response is the sole spoken answer. Its actual TTS audio
       // is passed to the model video generator for both built-in doctors.
