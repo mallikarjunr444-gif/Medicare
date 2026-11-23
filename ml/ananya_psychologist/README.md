@@ -18,3 +18,5 @@ The benchmark checks crisis handling, boundaries and spoken style. It is a scree
 validation: have a licensed professional review transcripts before real users see the model.
 
 `python -m pytest tests` runs the pipeline tests. Keep `hf_space/ananya_prompt.py` and `ananya_safety.py` in sync (tested).
+
+Colab: open `train_on_colab.ipynb` in Google Colab (T4 GPU) to run steps 1-4 end to end.
