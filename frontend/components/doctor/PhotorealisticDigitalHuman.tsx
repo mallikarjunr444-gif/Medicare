@@ -4,7 +4,7 @@ import { mouthChannel } from '@/lib/visemes'
 import React, { useRef, useEffect, useMemo, useState } from 'react'
 import type { DoctorId, DoctorState } from '@/lib/doctorTypes'
 import { DOCTORS } from '@/lib/doctorTypes'
-import { DOCTOR_FACE_DATA } from '@/lib/doctorFaceData'
+import { DOCTOR_FACE_DATA, DOCTOR_HAIR } from '@/lib/doctorFaceData'
 import { PortraitWarp } from '@/lib/portraitWarp'
 import { readVoiceDrive } from '@/lib/audioEnergy'
 import { EXPRESSION_POSE, type DoctorExpression } from '@/lib/doctorExpression'
@@ -23,6 +23,8 @@ interface PhotorealisticDigitalHumanProps {
   fallbackSpeechLevel?: number
   /** Facial expression: neutral, warm (gentle smile) or concerned. */
   expression?: DoctorExpression
+  /** Adds eye drift and swaying hair on top of the blinking and head motion (used on the landing page). */
+  lifelike?: boolean
   speakingVideoSrc?: string | null
   speakingVideoStartAt?: number
   getSpeakingAudioTime?: () => number | null
@@ -46,6 +48,7 @@ export function PhotorealisticDigitalHuman({
   subtitles = '',
   fallbackSpeechLevel = 0,
   expression = 'neutral',
+  lifelike = false,
   speakingVideoSrc = null,
   speakingVideoStartAt = 0,
   getSpeakingAudioTime,
@@ -82,6 +85,7 @@ export function PhotorealisticDigitalHuman({
     smile: 0,
     exprBrow: 0,
     doubleBlink: false,
+    gaze: { x: 0, y: 0, tx: 0, ty: 0, next: 1.4 },
   })
   const expressionRef = useRef<DoctorExpression>(expression)
   useEffect(() => {
@@ -97,7 +101,10 @@ export function PhotorealisticDigitalHuman({
   // Normalized landmark estimates for the two bundled portraits. This keeps
   // the fallback animation local and inexpensive; no cloud model or GPU needed.
   const face = FACE_ANCHORS[doctorId]
-  const warp = useMemo(() => new PortraitWarp(DOCTOR_FACE_DATA[doctorId === 'dr_ananya' ? 'dr_ananya' : 'dr_arjun']), [doctorId])
+  const warp = useMemo(() => {
+    const key = doctorId === 'dr_ananya' ? 'dr_ananya' : 'dr_arjun'
+    return new PortraitWarp(DOCTOR_FACE_DATA[key], lifelike ? DOCTOR_HAIR[key] : undefined)
+  }, [doctorId, lifelike])
 
   // Preload Doctor High-Res Photograph
   useEffect(() => {
@@ -194,6 +201,21 @@ export function PhotorealisticDigitalHuman({
       sim.breathing = 1.05 + breathPhase * 0.006
 
       // ─────────────────────────────────────────────────────────────
+      // Eye drift: mostly small glances around the camera, now and then a look to the side, always
+      // coming back. Moves are quick (a saccade), then hold still.
+      if (lifelike) {
+        const g = sim.gaze
+        if (t >= g.next) {
+          const aside = Math.abs(g.tx) < 0.5 && Math.random() < 0.3
+          g.tx = aside ? (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.4) : (Math.random() - 0.5) * 0.5
+          g.ty = aside ? (Math.random() - 0.65) * 0.9 : (Math.random() - 0.5) * 0.3
+          g.next = t + (aside ? 0.8 + Math.random() * 0.8 : 1.6 + Math.random() * 2.4)
+        }
+        const follow = 1 - Math.exp(-dt * 16)
+        g.x += (g.tx - g.x) * follow
+        g.y += (g.ty - g.y) * follow
+      }
+
       // 2. Conversational Head Kinematics & Posture by State
       // ─────────────────────────────────────────────────────────────
       // Slow, incommensurate drifts so the motion never visibly loops.
@@ -325,6 +347,7 @@ export function PhotorealisticDigitalHuman({
       ctx.save()
       ctx.translate(drawX, drawY)
       ctx.scale(drawWidth / img.naturalWidth, drawHeight / img.naturalHeight)
+      if (lifelike && !overlayEyes) warp.drawHair(ctx, img, t)
       if (overlayEyes) {
         warp.drawEyesOnly(ctx, img, debug?.blink ?? blink)
       } else {
@@ -334,6 +357,8 @@ export function PhotorealisticDigitalHuman({
           wide: debug?.wide ?? mouth.wide,
           brow: debug?.brow ?? Math.min(1, sim.browLift + sim.exprBrow),
           smile: sim.smile,
+          gazeX: lifelike ? sim.gaze.x : 0,
+          gazeY: lifelike ? sim.gaze.y : 0,
         })
       }
       ctx.restore()
@@ -346,7 +371,7 @@ export function PhotorealisticDigitalHuman({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     }
-  }, [imageLoaded, doctorId, doctorState, speakingVideoSrc, videoReady, warp])
+  }, [imageLoaded, doctorId, doctorState, speakingVideoSrc, videoReady, warp, lifelike])
 
   return (
     <div className={`relative w-full h-full bg-slate-950 flex items-center justify-center overflow-hidden select-none ${className}`}>

@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Square, Volume2 } from 'lucide-react'
 import { DOCTORS } from '@/lib/doctorTypes'
 import type { DoctorId } from '@/lib/doctorTypes'
 import { Reveal } from '@/components/ui/reveal'
-import { lineText, speakLine, stopSpeaking, type LandingLang } from '@/lib/landingVoice'
+import { lineText, romanText, speakLine, stopSpeaking, type LandingLang } from '@/lib/landingVoice'
 import { mouthChannel } from '@/lib/visemes'
 
 const H2 = 'text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] text-[#1d1d1f] sm:text-[48px] lg:text-[56px]'
@@ -160,10 +160,10 @@ export function HighlightsGallery() {
 
 /* ───────────────── language viewer (tabs) ───────────────── */
 
-const EXAMPLES: { id: LandingLang; tab: string; name: string; you: string }[] = [
-  { id: 'kn', tab: 'ಕನ್ನಡ', name: 'Kannada', you: 'ನನಗೆ ಮೂರು ದಿನಗಳಿಂದ ತಲೆನೋವು ಇದೆ.' },
-  { id: 'hi', tab: 'हिन्दी', name: 'Hindi', you: 'मुझे तीन दिन से सिरदर्द है।' },
-  { id: 'en', tab: 'English', name: 'English', you: 'I have had a headache for three days.' },
+const EXAMPLES: { id: LandingLang; tab: string; name: string }[] = [
+  { id: 'kn', tab: 'ಕನ್ನಡ', name: 'Kannada' },
+  { id: 'hi', tab: 'हिन्दी', name: 'Hindi' },
+  { id: 'en', tab: 'English', name: 'English' },
 ]
 
 /** Four bars that rise and fall with the mouth while the doctor speaks. */
@@ -197,6 +197,8 @@ export function LanguageViewer({ onStart }: { onStart: () => void }) {
   const [voiceNote, setVoiceNote] = useState('')
   const example = EXAMPLES[current]
   const reply = lineText('reply', example.id)
+  const ask = lineText('ask', example.id)
+  const roman = romanText(example.id)
 
   const play = useCallback((lang: LandingLang) => {
     setVoiceNote('')
@@ -237,13 +239,14 @@ export function LanguageViewer({ onStart }: { onStart: () => void }) {
       <p className="mt-3 text-center text-[13px] text-[#86868b]">Tap a language to hear Dr. Ananya reply.</p>
 
       <div role="tabpanel" aria-label={`${example.name} example`} className="mx-auto mt-8 max-w-[720px] space-y-4">
-        <p className="ml-auto w-fit max-w-[88%] rounded-[22px] rounded-br-md bg-[#0071e3] px-5 py-3.5 text-[19px] leading-[1.6] text-white sm:text-[22px]">{example.you}</p>
+        <p className="ml-auto w-fit max-w-[88%] rounded-[22px] rounded-br-md bg-[#0071e3] px-5 py-3.5 text-[19px] leading-[1.6] text-white sm:text-[22px]">{ask}</p>
         <div className="flex items-end gap-3">
           <span className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-full ring-2 transition-shadow ${speaking ? 'ring-[#2997ff] shadow-[0_0_0_6px_rgba(41,151,255,0.25)]' : 'ring-white/20'}`}>
             <Image src="/doctor/dr_ananya.jpg" alt="Dr. Ananya" fill sizes="44px" className="object-cover object-[50%_18%]" />
           </span>
           <div className={`w-fit max-w-[88%] rounded-[22px] rounded-bl-md bg-[#1d1d1f] px-5 py-3.5 transition-shadow ${speaking ? 'shadow-[0_0_0_2px_rgba(41,151,255,0.6)]' : ''}`}>
             <p aria-live="polite" className="text-[19px] leading-[1.6] text-[#f5f5f7] sm:text-[22px]">{reply}</p>
+            {roman && <p className="text-[14px] leading-snug text-[#a1a1a6]">{roman}</p>}
             <div className="mt-2 flex items-center gap-3">
               <button
                 type="button"
