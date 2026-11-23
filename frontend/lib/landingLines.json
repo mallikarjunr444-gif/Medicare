@@ -1,13 +1,23 @@
 {
-  "_note": "Spoken lines for the landing page. Read by lib/landingVoice.ts and by scripts/generate-landing-voices.py, so the captions and the recorded voice always say the same thing.",
+  "_note": "Spoken lines for the landing page. 'greet' is the hero caption (not spoken). 'ask' and 'reply' are the language-viewer exchange; 'reply' is spoken and is what scripts/generate-landing-voices.py records.",
   "greet": {
     "kn": "ನಮಸ್ಕಾರ, ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?",
     "hi": "नमस्ते, आज मैं आपकी कैसे मदद कर सकती हूँ?",
     "en": "Hello, how can I help you today?"
   },
   "reply": {
-    "kn": "ನಿಮಗೆ ನೋವಾಗುತ್ತಿರುವುದು ಕೇಳಿ ಬೇಸರವಾಯಿತು. ನೋವು ತಲೆಯ ಒಂದು ಬದಿಯಲ್ಲಿದೆಯೇ, ವಾಕರಿಕೆ ಕೂಡ ಇದೆಯೇ?",
-    "hi": "आपको तकलीफ़ हो रही है, यह जानकर दुख हुआ। क्या दर्द सिर के एक तरफ़ है, और क्या मितली भी आ रही है?",
-    "en": "I am sorry you are in pain. Is it on one side of your head, and do you feel any nausea?"
+    "kn": "ನಮಸ್ಕಾರ!",
+    "hi": "नमस्ते!",
+    "en": "Welcome!"
+  },
+  "ask": {
+    "kn": "ನಮಸ್ಕಾರ ಡಾಕ್ಟರ್.",
+    "hi": "नमस्ते डॉक्टर।",
+    "en": "Hello, doctor."
+  },
+  "roman": {
+    "kn": "Namaskara!",
+    "hi": "Namaste!",
+    "en": ""
   }
 }

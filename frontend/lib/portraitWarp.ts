@@ -28,6 +28,31 @@ export interface PortraitPose {
   brow: number
   /** -0.5 (corners down, concerned) .. 1 (broad smile); 0 is neutral. */
   smile?: number
+  /** -1 (looking left) .. 1 (right): the iris drifts inside the eye opening. 0 is straight ahead. */
+  gazeX?: number
+  /** -1 (up) .. 1 (down). */
+  gazeY?: number
+}
+
+/**
+ * Where a doctor's hair hangs, in source-image pixels, so it can sway gently. Only the strands
+ * beside the face and neck move; the face, neck and clothing never do. Tuned per photograph.
+ */
+export interface HairSwayRegion {
+  /** Rows above `top` stay still; the sway builds up to full strength at `full`. */
+  top: number
+  full: number
+  /** Sway fades back to nothing between `fadeFrom` and `bottom` (where hair meets the coat). */
+  fadeFrom: number
+  bottom: number
+  /** Outer edges of the moving areas, in the plain wall behind the hair. */
+  leftOuter: number
+  rightOuter: number
+  /** Where the neck starts on each side, so the sway never touches it. */
+  neckL: number
+  neckR: number
+  /** Largest sideways movement of the hair tips, in source px. */
+  amplitude: number
 }
 
 interface Cell {
@@ -37,6 +62,8 @@ interface Cell {
   x1: number
   y1: number
   zone: 'eyeL' | 'eyeR' | 'mouth' | 'browL' | 'browR'
+  /** Eye cells that cover the eyeball itself (the only ones the gaze drift moves). */
+  ball?: boolean
   /** True for mouth cells that straddle the lip line (they open up when speaking). */
   seam: boolean
 }
@@ -61,6 +88,11 @@ interface Anchors {
 }
 
 const CELL = 3.5
+const HAIR_BAND = 8
+const HAIR_COLUMNS = 5
+
+interface HairColumn { x: number; w: number; k: number; side: 0 | 1 }
+interface HairBand { y: number; h: number; k: number; cols: HairColumn[] }
 
 const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1])
 const mean = (vals: number[]) => vals.reduce((s, v) => s + v, 0) / vals.length
@@ -122,6 +154,47 @@ function buildAnchors(face: DoctorFaceData): Anchors {
   }
 }
 
+/** Pre-computes the hair bands: which strips of the photo move, and how strongly. */
+function buildHair(face: DoctorFaceData, r: HairSwayRegion): { bands: HairBand[]; amplitude: number } {
+  const p = face.points
+  // The face edge at row y, from the jaw landmarks (0..8 left, 16..8 right); the neck limits it lower down.
+  const edge = (y: number, from: number, to: number): number => {
+    const idx: number[] = []
+    for (let i = from; from < to ? i <= to : i >= to; i += from < to ? 1 : -1) idx.push(i)
+    if (y <= p[idx[0]][1]) return p[idx[0]][0]
+    for (let i = 1; i < idx.length; i++) {
+      const a = p[idx[i - 1]]
+      const b = p[idx[i]]
+      if (y <= b[1]) return a[0] + ((b[0] - a[0]) * (y - a[1])) / Math.max(1e-6, b[1] - a[1])
+    }
+    return p[idx[idx.length - 1]][0]
+  }
+  const bands: HairBand[] = []
+  for (let y = r.top; y < r.bottom; y += HAIR_BAND) {
+    const yc = y + HAIR_BAND / 2
+    const k = smooth((yc - r.top) / (r.full - r.top)) * (1 - smooth((yc - r.fadeFrom) / (r.bottom - r.fadeFrom)))
+    if (k < 0.02) continue
+    const innerL = Math.min(edge(yc, 0, 8), r.neckL)
+    const innerR = Math.max(edge(yc, 16, 8), r.neckR)
+    const cols: HairColumn[] = []
+    const addSide = (x0: number, x1: number, side: 0 | 1) => {
+      const cw = (x1 - x0) / HAIR_COLUMNS
+      for (let i = 0; i < HAIR_COLUMNS; i++) {
+        const x = x0 + i * cw
+        const xc = x + cw / 2
+        const fromFace = side === 0 ? innerL - xc : xc - innerR
+        const fromOuter = side === 0 ? xc - r.leftOuter : r.rightOuter - xc
+        const kc = smooth(fromFace / 22) * smooth(fromOuter / 14)
+        if (kc > 0.02) cols.push({ x, w: cw, k: kc, side })
+      }
+    }
+    addSide(r.leftOuter, innerL, 0)
+    addSide(innerR, r.rightOuter, 1)
+    bands.push({ y, h: HAIR_BAND, k, cols })
+  }
+  return { bands, amplitude: r.amplitude }
+}
+
 /** Least-squares fit of v = a + b*u + c*u^2. */
 function fitQuadratic(samples: { u: number; v: number }[]): [number, number, number] {
   let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, t0 = 0, t1 = 0, t2 = 0
@@ -157,6 +230,16 @@ function buildCells(a: Anchors): Cell[] {
     const rx = e.w * 0.95
     add(i === 0 ? 'eyeL' : 'eyeR', e.cx - rx, e.lid - e.w * 0.85, e.cx + rx, e.low + e.w * 0.45)
   })
+  a.eye.forEach((e, i) => {
+    const zone = i === 0 ? 'eyeL' : 'eyeR'
+    const h = Math.max(1, e.low - e.lid)
+    for (const c of cells) {
+      if (c.zone !== zone) continue
+      const mx = (c.x0 + c.x1) / 2
+      const my = (c.y0 + c.y1) / 2
+      c.ball = Math.abs(mx - e.cx) < e.w * 0.55 + CELL && my > e.lid - h * 0.4 - CELL && my < e.low + h * 0.4 + CELL
+    }
+  })
   a.brow.forEach((b, i) => add(i === 0 ? 'browL' : 'browR', b.cx - b.w * 0.7, b.cy - b.w * 0.32, b.cx + b.w * 0.7, b.cy + b.w * 0.34))
   const m = a.mouth
   add('mouth', m.cx - m.w * 0.95, m.top - m.w * 0.45, m.cx + m.w * 0.95, m.bottom + m.w * 0.85)
@@ -169,10 +252,13 @@ export class PortraitWarp {
   /** Pixel size the mouth interior grows to at full opening. */
   readonly maxOpenPx: number
 
-  constructor(private readonly face: DoctorFaceData) {
+  private readonly hair: { bands: HairBand[]; amplitude: number } | null
+
+  constructor(private readonly face: DoctorFaceData, hair?: HairSwayRegion) {
     this.a = buildAnchors(face)
     this.cells = buildCells(this.a)
     this.maxOpenPx = this.a.mouth.w * 0.22
+    this.hair = hair ? buildHair(face, hair) : null
   }
 
   /** Displace one source point. Returns new [x, y]. */
@@ -181,15 +267,30 @@ export class PortraitWarp {
     if (zone === 'eyeL' || zone === 'eyeR') {
       const e = a.eye[zone === 'eyeL' ? 0 : 1]
       const gx = smooth(1 - Math.abs(x - e.cx) / (e.w * 0.95))
+      let nx = x
+      let ny: number
       if (y <= e.low) {
         // Upper lid and the skin just above it slide down onto the lower lid; the effect fades
         // out well before the brow so the brow never smears.
         const u = e.low - y
         const k = pose.blink * gx * (1 - smooth(u / (e.w * 0.6)))
-        return [x, e.low - u * (1 - k * 0.96)]
+        ny = e.low - u * (1 - k * 0.96)
+      } else {
+        const gy = smooth(1 - (y - e.low) / (e.w * 0.4))
+        ny = y - pose.blink * gx * gy * e.w * 0.06
       }
-      const gy = smooth(1 - (y - e.low) / (e.w * 0.4))
-      return [x, y - pose.blink * gx * gy * e.w * 0.06]
+      // Gaze: the iris and the white of the eye slide together inside the opening. The push fades
+      // to nothing at the corners and lids, so the eye shape itself never changes.
+      const gazeX = pose.gazeX ?? 0
+      const gazeY = pose.gazeY ?? 0
+      if (gazeX !== 0 || gazeY !== 0) {
+        const mid = (e.lid + e.low) / 2
+        const half = Math.max(1, (e.low - e.lid) / 2)
+        const wgt = smooth(1 - Math.abs(x - e.cx) / (e.w * 0.52)) * smooth(1 - Math.abs(y - mid) / (half * 1.35))
+        nx += gazeX * e.w * 0.12 * wgt
+        ny += gazeY * e.w * 0.045 * wgt
+      }
+      return [nx, ny]
     }
     if (zone === 'browL' || zone === 'browR') {
       const b = a.brow[zone === 'browL' ? 0 : 1]
@@ -230,8 +331,10 @@ export class PortraitWarp {
     const openPx = Math.max(0, pose.open) * this.maxOpenPx
     const mouthOpen = openPx > 0.35
 
+    const gazing = Math.abs(pose.gazeX ?? 0) > 0.02 || Math.abs(pose.gazeY ?? 0) > 0.02
     for (const c of this.cells) {
-      if (c.zone.startsWith('eye') && pose.blink < 0.01) continue
+      // With no blink only the eyeball cells matter, and only while the eyes are looking aside.
+      if (c.zone.startsWith('eye') && pose.blink < 0.01 && !(gazing && c.ball)) continue
       if (c.zone.startsWith('brow') && pose.brow < 0.01) continue
       if (c.zone === 'mouth' && !mouthOpen && Math.abs(pose.wide - 1) < 0.01 && Math.abs(pose.smile ?? 0) < 0.02) continue
       const p00 = this.displace(c.x0, c.y0, c.zone, pose, openPx)
@@ -263,6 +366,27 @@ export class PortraitWarp {
       }
     }
     void m
+  }
+
+  /**
+   * Sway the hair beside the face. Call after the base photo is drawn and before `draw`.
+   * Each horizontal band of hair is re-drawn from a slightly shifted part of the photo, so the
+   * strands slide sideways while everything else stays put. The shift is zero at the face and
+   * grows outward and downward, like hair swinging from the head. `t` is seconds.
+   */
+  drawHair(ctx: CanvasRenderingContext2D, img: CanvasImageSource, t: number) {
+    const hair = this.hair
+    if (!hair) return
+    const sway = 0.72 + 0.28 * Math.sin(t * 0.43)
+    for (const band of hair.bands) {
+      for (const c of band.cols) {
+        const wave =
+          0.62 * Math.sin(t * 1.1 + band.y * 0.018 + c.side * 2.1) +
+          0.38 * Math.sin(t * 2.3 + band.y * 0.031 + c.side * 0.7 + 1.3)
+        const shift = hair.amplitude * sway * band.k * c.k * wave
+        ctx.drawImage(img, c.x - shift, band.y, c.w, band.h, c.x, band.y, c.w, band.h)
+      }
+    }
   }
 
   /**

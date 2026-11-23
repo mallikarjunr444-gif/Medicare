@@ -17,7 +17,7 @@ import { attachAudioAnalyser } from './audioEnergy'
 import { startLipSync, type LipSyncHandle } from './visemes'
 
 export type LandingLang = 'kn' | 'hi' | 'en'
-export type LandingKind = 'greet' | 'reply'
+export type LandingKind = 'greet' | 'ask' | 'reply'
 export type NoVoiceReason = 'unsupported' | 'no-voice'
 
 export interface SpeakCallbacks {
@@ -28,9 +28,14 @@ export interface SpeakCallbacks {
 
 export const lineText = (kind: LandingKind, lang: LandingLang): string => lines[kind][lang]
 
+/** Latin-letter spelling of the spoken reply ("Namaskara!"), or '' when the language already uses Latin letters. */
+export const romanText = (lang: LandingLang): string => lines.roman[lang]
+
 const TAG: Record<LandingLang, string> = { kn: 'kn-in', hi: 'hi-in', en: 'en-in' }
 const BCP47: Record<LandingLang, string> = { kn: 'kn-IN', hi: 'hi-IN', en: 'en-IN' }
 const FEMALE = /female|woman|swara|sapna|neerja|kalpana|veena|lekha|heera|priya|soumya|aria|jenny|sonia|zira|samantha|karen|tessa|google (hindi|kannada|uk english female|us english)/i
+// Voices people usually find warmest, best first: Microsoft "Natural" voices, then Apple's Indian voices.
+const SWEETEST = /sapna|swara|neerja|natural|lekha|veena|soumya/i
 const MALE = /(?<!fe)male|madhur|gagan|prabhat|ravi|hemant|rishi|david|mark|george|daniel/i
 
 function rankVoice(v: SpeechSynthesisVoice, lang: LandingLang): number {
@@ -40,6 +45,7 @@ function rankVoice(v: SpeechSynthesisVoice, lang: LandingLang): number {
     (FEMALE.test(v.name) ? 5 : 0) -
     (MALE.test(v.name) ? 6 : 0) +
     (/natural|neural|online|google/i.test(v.name) ? 3 : 0) +
+    (SWEETEST.test(v.name) ? 4 : 0) +
     (v.localService ? 0 : 1)
   )
 }
@@ -125,8 +131,8 @@ export function speakLine(kind: LandingKind, lang: LandingLang, cb: SpeakCallbac
     ;(window as unknown as { __landingUtterance?: SpeechSynthesisUtterance }).__landingUtterance = utterance
     if (voice) utterance.voice = voice
     utterance.lang = voice?.lang ?? BCP47[lang]
-    utterance.rate = 0.92
-    utterance.pitch = 1.1
+    utterance.rate = 0.88 // unhurried
+    utterance.pitch = 1.12 // a touch higher and softer
     lip = startLipSync(text, utterance.rate)
     utterance.onstart = () => cb.onStart?.()
     utterance.onboundary = (e) => lip?.boundary(e.charIndex)

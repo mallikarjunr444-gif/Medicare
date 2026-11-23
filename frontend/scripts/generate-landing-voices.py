@@ -29,7 +29,7 @@ RATE, PITCH = "-8%", "+4Hz"
 async def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     done = []
-    for kind in ("greet", "reply"):
+    for kind in ("reply",):
         for lang, voice in VOICES.items():
             clip_id = f"{kind}-{lang}"
             await edge_tts.Communicate(LINES[kind][lang], voice, rate=RATE, pitch=PITCH).save(str(OUT / f"{clip_id}.mp3"))
