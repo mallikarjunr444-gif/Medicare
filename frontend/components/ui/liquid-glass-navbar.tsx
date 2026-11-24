@@ -83,6 +83,8 @@ export function LiquidNavbar({
   const activeIndex = controlledActive !== undefined ? controlledActive : internalActive;
 
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  // Measured in the hover handler (not during render) so the droplet never reads refs while rendering.
+  const [hoverRect, setHoverRect] = useState<{ left: number; width: number; height: number } | null>(null);
   const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number; height: number }>({ left: 0, width: 0, height: 0 });
   const [stretching, setStretching] = useState(false);
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
@@ -132,7 +134,7 @@ export function LiquidNavbar({
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const id = Date.now();
+    const id = new Date().getTime();
     setRipples((prev) => [...prev, { id, x, y }]);
     setTimeout(() => {
       setRipples((prev) => prev.filter((r) => r.id !== id));
@@ -197,16 +199,16 @@ export function LiquidNavbar({
         </div>
 
         {/* Hover Meniscus Tracking Droplet */}
-        {hoverIndex !== null && hoverIndex !== activeIndex && (
+        {hoverIndex !== null && hoverIndex !== activeIndex && hoverRect && (
           <div
             className={cn(
               "absolute top-1.5 rounded-full pointer-events-none transition-all duration-300 ease-out",
               isDark ? "bg-white/5" : "bg-[#0058b0]/5"
             )}
             style={{
-              left: `${itemsRef.current[hoverIndex]?.offsetLeft || 0}px`,
-              width: `${itemsRef.current[hoverIndex]?.offsetWidth || 0}px`,
-              height: `${itemsRef.current[hoverIndex]?.offsetHeight || 0}px`,
+              left: `${hoverRect.left}px`,
+              width: `${hoverRect.width}px`,
+              height: `${hoverRect.height}px`,
             }}
           />
         )}
@@ -224,7 +226,11 @@ export function LiquidNavbar({
               }}
               type="button"
               onClick={(e) => handleSelect(index, e)}
-              onMouseEnter={() => setHoverIndex(index)}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget;
+                setHoverRect({ left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight });
+                setHoverIndex(index);
+              }}
               onMouseLeave={() => setHoverIndex(null)}
               aria-current={isActive ? "page" : undefined}
               className={cn(
