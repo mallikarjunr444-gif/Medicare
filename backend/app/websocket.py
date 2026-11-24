@@ -16,6 +16,7 @@ from fastapi import WebSocket
 
 from app.config import settings
 from app.services.animator import avatar_animator
+from app.services import psych_safety
 from app.services.llm import (
     LLMAuthError,
     LLMError,
@@ -859,9 +860,14 @@ class ConnectionManager:
             # ── 1. Deterministic Clinical Safety & Emergency Evaluation ─────
             from app.services.safety_service import medical_safety_validator
             safety_eval = medical_safety_validator.evaluate_patient_query(text)
-            if safety_eval.is_emergency:
+            # Suicidal thoughts / self-harm get a caring, language-matched reply (any doctor), not the
+            # generic medical-emergency text.
+            mental_crisis = psych_safety.is_crisis(text)
+            if mental_crisis or safety_eval.is_emergency:
                 emergency_reply = (
-                    safety_eval.emergency_message
+                    psych_safety.crisis_reply(selected_language)
+                    if mental_crisis
+                    else safety_eval.emergency_message
                     or "EMERGENCY ALERT: Potential critical symptoms detected. Please call 112 (India) or visit the nearest emergency room immediately."
                 )
                 await self._persist_message(session_id, "user", text)
@@ -1017,6 +1023,10 @@ class ConnectionManager:
             if response_text:
                 # Validate and sanitize response against illegal prescriptions or diagnostic claims
                 _, response_text = medical_safety_validator.validate_ai_response(response_text)
+                if data.get("doctor_id") == "dr_ananya":
+                    response_text, replaced = psych_safety.review_reply(response_text, selected_language)
+                    if replaced:
+                        logger.warning("psych_reply_replaced session=%s", session_id)
                 messages.append({"role": "assistant", "content": response_text})
                 data["messages"] = messages
                 latency = (datetime.now(timezone.utc) - started_at).total_seconds()
