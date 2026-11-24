@@ -11,6 +11,9 @@
   // Non-secret config. Secrets (DATABASE_URL, JWT_SECRET_KEY, SENTRY_DSN) are
   // NEVER put here: set them with `wrangler secret put <NAME>`.
   "vars": {
+    // Public Firebase project id. The API only accepts Firebase ID tokens issued for THIS project.
+    // Must equal NEXT_PUBLIC_FIREBASE_PROJECT_ID in the website build. Verify it in Firebase Console > Project settings.
+    "FIREBASE_PROJECT_ID": "medicus-labs",
     "ENVIRONMENT": "development",
     "CORS_ORIGINS": "http://localhost:3000",
     "AUTH_COOKIE_NAME": "access_token",
@@ -30,6 +33,7 @@
       "name": "medicare-api-prod",
       "ai": { "binding": "AI" },
       "vars": {
+        "FIREBASE_PROJECT_ID": "medicus-labs",
         "ENVIRONMENT": "production",
         // Exact Firebase Hosting origins only (no wildcards). Add the MediCare site here once it exists.
         "CORS_ORIGINS": "https://medicare-web.mallikarjunr444.workers.dev,https://medicus-labs.web.app,https://medicus-labs.firebaseapp.com",

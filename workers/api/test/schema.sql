@@ -2,6 +2,7 @@
 CREATE TABLE users (
   id varchar PRIMARY KEY, email varchar NOT NULL UNIQUE, username varchar NOT NULL UNIQUE,
   hashed_password varchar NOT NULL, full_name varchar, is_active boolean DEFAULT true,
+  firebase_uid varchar, photo_url text, phone varchar, date_of_birth date, gender varchar, last_login_at timestamptz,
   is_superuser boolean DEFAULT false, is_guest boolean NOT NULL DEFAULT false,
   created_at timestamptz DEFAULT now(), updated_at timestamptz);
 CREATE TABLE avatars (
@@ -45,3 +46,14 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
 );
 CREATE INDEX IF NOT EXISTS knowledge_chunks_tsv_idx ON knowledge_chunks USING gin (tsv);
 CREATE INDEX IF NOT EXISTS knowledge_chunks_collection_idx ON knowledge_chunks (collection);
+
+CREATE UNIQUE INDEX users_firebase_uid_uq ON users (firebase_uid) WHERE firebase_uid IS NOT NULL;
+CREATE TABLE health_records (
+  id varchar PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  record_type varchar NOT NULL DEFAULT 'note', title varchar NOT NULL, data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  recorded_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE reports (
+  id varchar PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id varchar REFERENCES sessions(id) ON DELETE SET NULL, report_type varchar NOT NULL DEFAULT 'lab',
+  title varchar NOT NULL, content text, data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());

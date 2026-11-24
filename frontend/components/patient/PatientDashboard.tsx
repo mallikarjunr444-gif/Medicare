@@ -7,14 +7,17 @@ import {
   FileText,
   ShieldCheck,
   Stethoscope,
-  UserRound,
 } from 'lucide-react'
+import { UserAvatar } from '@/components/auth/UserAvatar'
+import { ConsultationHistory } from '@/components/profile/ConsultationHistory'
 
-type PatientDestination = 'consultation' | 'history' | 'notes' | 'appointments'
+type PatientDestination = 'consultation' | 'history' | 'notes' | 'appointments' | 'profile'
 
 interface PatientDashboardProps {
   displayName: string
   isGuest: boolean
+  email?: string | null
+  photoUrl?: string | null
   onNavigate: (destination: PatientDestination) => void
 }
 
@@ -55,9 +58,8 @@ const careActions: {
   },
 ]
 
-export function PatientDashboard({ displayName, isGuest, onNavigate }: PatientDashboardProps) {
+export function PatientDashboard({ displayName, isGuest, email, photoUrl, onNavigate }: PatientDashboardProps) {
   const firstName = displayName.trim().split(/\s+/)[0] || 'Patient'
-  const initials = firstName.slice(0, 1).toUpperCase()
 
   return (
     <section className="mx-auto min-h-[calc(100dvh-4.25rem)] max-w-7xl px-4 py-7 sm:px-6 sm:py-10">
@@ -87,22 +89,25 @@ export function PatientDashboard({ displayName, isGuest, onNavigate }: PatientDa
                 <h2 className="mt-2 text-xl font-semibold tracking-tight text-[#1d1d1f]">Welcome, {firstName}</h2>
               </div>
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#f5f5f7] text-[#0058b0]">
-                <UserRound size={21} aria-hidden="true" />
+                <ShieldCheck size={21} aria-hidden="true" />
               </span>
             </div>
             <div className="mt-5 flex items-center gap-3 rounded-2xl bg-[#f5f5f7] p-3.5">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#eaf2fd] text-sm font-semibold text-[#1d1d1f]">
-                {initials}
-              </span>
+              <UserAvatar name={displayName} email={email} photoUrl={photoUrl} size={40} />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-[#1d1d1f]">{displayName}</p>
-                <p className="mt-0.5 text-xs text-[#6e6e73]">{isGuest ? 'Guest patient' : 'Patient account'}</p>
+                <p className="mt-0.5 truncate text-xs text-[#6e6e73]">{isGuest ? 'Guest patient' : email || 'Patient account'}</p>
               </div>
               <span className="ml-auto h-2 w-2 rounded-full bg-[#0071e3]" aria-label="Profile active" />
             </div>
           </div>
           <p className="mt-5 text-xs leading-5 text-[#6e6e73]">
-            Your conversations are associated with this profile. You can manage your preferences in Settings.
+            Your conversations are associated with this profile.{' '}
+            {!isGuest && (
+              <button type="button" onClick={() => onNavigate('profile')} className="font-semibold text-[#0058b0] hover:underline focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30">
+                Edit your profile
+              </button>
+            )}
           </p>
         </div>
       </div>
@@ -135,7 +140,17 @@ export function PatientDashboard({ displayName, isGuest, onNavigate }: PatientDa
         ))}
       </div>
 
-      <div className="mt-6 flex flex-col gap-4 rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 sm:flex-row sm:items-center sm:p-6">
+      {!isGuest && (
+        <div className="mt-9">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0058b0]">Saved to your account</p>
+          <h2 className="mt-1.5 text-2xl font-semibold tracking-tight text-[#1d1d1f]">Recent consultations</h2>
+          <div className="mt-5">
+            <ConsultationHistory limit={5} onViewAll={() => onNavigate('history')} onStart={() => onNavigate('consultation')} />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-9 flex flex-col gap-4 rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 sm:flex-row sm:items-center sm:p-6">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-[#0058b0]">
           <ShieldCheck size={20} aria-hidden="true" />
         </span>

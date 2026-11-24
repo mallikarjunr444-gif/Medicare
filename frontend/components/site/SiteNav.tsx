@@ -9,10 +9,12 @@ interface SiteNavProps {
   appLinks: { id: string; label: string }[]
   onNavigate: (id: string) => void
   onStart: () => void
+  /** Account control (sign in / avatar menu), shown beside the main action. */
+  account?: React.ReactNode
 }
 
 /** A thin, translucent bar that stays out of the way: brand left, links centred, one action right. */
-export function SiteNav({ view, homeLinks, appLinks, onNavigate, onStart }: SiteNavProps) {
+export function SiteNav({ view, homeLinks, appLinks, onNavigate, onStart, account }: SiteNavProps) {
   const isHome = view === 'home'
   return (
     <header className="sticky top-0 z-50 border-b border-black/[0.08] bg-white/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl backdrop-saturate-150">
@@ -60,13 +62,16 @@ export function SiteNav({ view, homeLinks, appLinks, onNavigate, onStart }: Site
               ))}
         </nav>
 
-        <button
-          type="button"
-          onClick={onStart}
-          className="inline-flex h-8 shrink-0 items-center rounded-full bg-[#0071e3] px-4 text-[13px] font-normal text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30"
-        >
-          Talk to a doctor
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {account}
+          <button
+            type="button"
+            onClick={onStart}
+            className="inline-flex h-8 shrink-0 items-center rounded-full bg-[#0071e3] px-4 text-[13px] font-normal text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30"
+          >
+            Talk to a doctor
+          </button>
+        </div>
       </div>
     </header>
   )

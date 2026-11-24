@@ -1,7 +1,8 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AppVars, DbUser, Env } from "./env";
+import type { AppVars, DbUser, Env, Query } from "./env";
 import { fail } from "./http";
+import { looksLikeFirebaseToken, verifyFirebaseToken } from "./firebaseAuth";
 
 type C = Context<{ Bindings: Env; Variables: AppVars }>;
 
@@ -63,6 +64,21 @@ export function clearAuthCookie(c: C): void {
   deleteCookie(c, c.env.AUTH_COOKIE_NAME, { domain: c.env.AUTH_COOKIE_DOMAIN || undefined, path: "/" });
 }
 
+/**
+ * Resolves a token of either kind to the owning user's row id, or null.
+ * Firebase ID tokens (RS256) are verified against Google's keys and mapped through users.firebase_uid;
+ * our own HS256 tokens keep working unchanged. Shared by HTTP and WebSocket auth.
+ */
+export async function userIdFromToken(env: Env, query: Query, token: string): Promise<string | null> {
+  if (looksLikeFirebaseToken(token)) {
+    const claims = await verifyFirebaseToken(env, token);
+    if (!claims) return null;
+    const rows = await query("SELECT id FROM users WHERE firebase_uid = $1", [claims.uid]);
+    return (rows[0]?.id as string | undefined) ?? null;
+  }
+  return subjectFromToken(env, token);
+}
+
 /** Bearer header first, then the httpOnly cookie. Sets c.var.user (or null). */
 export const loadUser: MiddlewareHandler<{ Bindings: Env; Variables: AppVars }> = async (c, next) => {
   let token: string | undefined;
@@ -71,9 +87,9 @@ export const loadUser: MiddlewareHandler<{ Bindings: Env; Variables: AppVars }> 
   if (!token) token = getCookie(c, c.env.AUTH_COOKIE_NAME);
   let user: DbUser | null = null;
   if (token) {
-    const sub = await subjectFromToken(c.env, token);
-    if (sub) {
-      const rows = await c.var.query("SELECT * FROM users WHERE id = $1", [sub]);
+    const id = await userIdFromToken(c.env, c.var.query, token);
+    if (id) {
+      const rows = await c.var.query("SELECT * FROM users WHERE id = $1", [id]);
       user = (rows[0] as DbUser | undefined) ?? null;
     }
   }

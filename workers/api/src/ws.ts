@@ -1,4 +1,4 @@
-import { subjectFromToken } from "./auth";
+import { userIdFromToken } from "./auth";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
 import { synthesizeSpeech } from "./tts";
@@ -279,7 +279,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   }
 
   const query = makeQuery(env);
-  const uid = token ? await subjectFromToken(env, token) : null;
+  const uid = token ? await userIdFromToken(env, query, token) : null;
   const session = uid
     ? (await query(
         `SELECT s.id, s.status, a.avatar_metadata AS meta FROM sessions s JOIN avatars a ON a.id = s.avatar_id
