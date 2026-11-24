@@ -54,6 +54,7 @@ export type WsMessage =
   | { type: 'token'; token: string }
   | { type: 'transcription'; text: string }
   | { type: 'message'; role: 'assistant'; content: string; triage?: 4; is_emergency?: boolean; sources?: { title: string; year: string; url: string }[] }
+  | { type: 'screening_result'; scale: string; name: string; score: number | null; max: number; band: string; band_label: string; item9_positive: boolean }
   | { type: 'audio_chunk'; chunk_index: number; mime_type: string; text: string; audio_data: string }
   | { type: 'audio_stream_end' }
   | { type: 'audio_error'; message: string }

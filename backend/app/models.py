@@ -180,3 +180,26 @@ class ConsultationReport(Base):
     report = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ScreeningResult(Base):
+    """A completed check-in questionnaire (PHQ-9, GAD-7, WHO-5, PSS-10) from a chat with Dr. Ananya.
+
+    One row per scale per session. Screening only, never a diagnosis. `score` is None when the
+    questionnaire was stopped at PHQ-9 question 9 (a positive answer), which is kept as a flag instead."""
+
+    __tablename__ = "screening_results"
+    __table_args__ = (Index("ux_screening_session_scale", "session_id", "scale", unique=True),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    scale = Column(String, nullable=False)
+    score = Column(Integer, nullable=True)
+    max_score = Column(Integer, nullable=False)
+    band = Column(String, nullable=False)
+    band_label = Column(String, nullable=False)
+    item9_positive = Column(Boolean, nullable=False, default=False)
+    answers = Column(JSON, nullable=False)
+    language = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

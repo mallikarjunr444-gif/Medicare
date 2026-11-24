@@ -51,6 +51,15 @@ export interface MedicalReportItem {
   warningSigns: string[]
 }
 
+/** A questionnaire Dr. Ananya ran in the chat (screening only, never a diagnosis). */
+export interface CheckInResult {
+  name: string
+  score: number | null // null when stopped at PHQ-9 question 9
+  max: number
+  bandLabel: string
+  item9Positive: boolean
+}
+
 export interface ConsultationSummaryData {
   id: string
   consultationDate: string
@@ -68,6 +77,7 @@ export interface ConsultationSummaryData {
   warningSignsIdentified: string[]
   recommendedNextSteps: string[]
   referralRecommendation: string
+  checkIns?: CheckInResult[]
   disclaimer: string
 }
 

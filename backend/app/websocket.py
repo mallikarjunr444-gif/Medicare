@@ -918,6 +918,8 @@ class ConnectionManager:
                 step = psych_screening.handle(screening, text, selected_language)
                 if step is not None:
                     await self._say_canned(session_id, data, messages, text, step.reply, started_at, crisis=step.crisis)
+                    if step.result:
+                        await self._record_screening(session_id, data, step.result, selected_language)
                     return
 
             # ── 2. Shared medical + wellness reference retrieval ───────────
@@ -1054,6 +1056,51 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Text error [{session_id}]: {e}")
             await self.send_message(session_id, {"type": "error", "message": "Processing failed"})
+
+    async def _record_screening(self, session_id: str, data: dict, result: dict, language: str) -> None:
+        """Save a finished check-in (best effort) and tell the client so it appears in the final report."""
+        user_id = data.get("user_id")
+        if user_id:
+            try:
+                from sqlalchemy import select
+
+                from app.database import AsyncSessionLocal
+                from app.models import ScreeningResult
+
+                async with AsyncSessionLocal() as db:
+                    row = (
+                        await db.execute(
+                            select(ScreeningResult).where(
+                                ScreeningResult.session_id == session_id, ScreeningResult.scale == result["scale"]
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if row is None:
+                        row = ScreeningResult(session_id=session_id, user_id=user_id, scale=result["scale"])
+                        db.add(row)
+                    row.score = result["score"]
+                    row.max_score = result["max"]
+                    row.band = result["band"]
+                    row.band_label = result["band_label"]
+                    row.item9_positive = bool(result["item9_positive"])
+                    row.answers = result["answers"]
+                    row.language = language
+                    await db.commit()
+            except Exception as e:
+                logger.warning(f"Could not save check-in for {session_id}: {e}")
+        await self.send_message(
+            session_id,
+            {
+                "type": "screening_result",
+                "scale": result["scale"],
+                "name": result["name"],
+                "score": result["score"],
+                "max": result["max"],
+                "band": result["band"],
+                "band_label": result["band_label"],
+                "item9_positive": bool(result["item9_positive"]),
+            },
+        )
 
     async def _say_canned(
         self,

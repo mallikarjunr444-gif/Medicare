@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.users import require_current_user
 from app.database import get_db
-from app.models import ConsultationReport, Session, User
+from app.models import ConsultationReport, ScreeningResult, Session, User
 
 router = APIRouter()
 
@@ -22,8 +22,28 @@ class ReportIn(BaseModel):
     report: dict[str, Any]
 
 
-def _out(r: ConsultationReport) -> dict[str, Any]:
+def _check_in_out(c: ScreeningResult) -> dict[str, Any]:
     return {
+        "scale": c.scale,
+        "score": c.score,
+        "max": c.max_score,
+        "band": c.band,
+        "band_label": c.band_label,
+        "item9_positive": c.item9_positive,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+async def _check_ins(db: AsyncSession, session_id: str) -> list[dict[str, Any]]:
+    res = await db.execute(
+        select(ScreeningResult).where(ScreeningResult.session_id == session_id).order_by(ScreeningResult.created_at)
+    )
+    return [_check_in_out(c) for c in res.scalars()]
+
+
+def _out(r: ConsultationReport, check_ins: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    return {
+        "check_ins": check_ins or [],
         "id": r.id,
         "session_id": r.session_id,
         "doctor_id": r.doctor_id,
@@ -65,7 +85,7 @@ async def save_report(
     row.report = body.report
     await db.commit()
     await db.refresh(row)
-    return _out(row)
+    return _out(row, await _check_ins(db, session_id))
 
 
 @router.get("/{session_id}")
@@ -81,4 +101,15 @@ async def get_report(
     row = res.scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No report yet")
-    return _out(row)
+    return _out(row, await _check_ins(db, session_id))
+
+
+@router.get("/{session_id}/check-ins")
+async def get_check_ins(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+):
+    """Questionnaire results saved for this session (empty list if none)."""
+    await _owned_session(db, session_id, current_user)
+    return {"session_id": session_id, "check_ins": await _check_ins(db, session_id)}

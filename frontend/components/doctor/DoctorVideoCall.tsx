@@ -59,6 +59,7 @@ import {
   type ClinicalSessionMemory,
 } from '@/lib/medicalConsultationEngine'
 import type {
+  CheckInResult,
   DoctorId,
   DoctorState,
   ConsultationLanguage,
@@ -115,6 +116,7 @@ export function DoctorVideoCall({
   const [consultationSeconds, setConsultationSeconds] = useState(0)
   const [inputText, setInputText] = useState('')
   const [activeTriage, setActiveTriage] = useState<TriageLevel>(1)
+  const checkInsRef = useRef<CheckInResult[]>([])
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
   const [isReportDrawerOpen, setIsReportDrawerOpen] = useState(false)
   const [isSpecialistModalOpen, setIsSpecialistModalOpen] = useState(false)
@@ -301,6 +303,13 @@ export function DoctorVideoCall({
             ? previous.map((entry) => entry.id === liveMessageId ? { ...entry, text: liveEntry.text } : entry)
             : [...previous, liveEntry]
         })
+        break
+      case 'screening_result':
+        // Dr. Ananya finished a check-in questionnaire; it is added to the end-of-call report.
+        checkInsRef.current = [
+          ...checkInsRef.current.filter((c) => c.name !== event.name),
+          { name: event.name, score: event.score, max: event.max, bandLabel: event.band_label, item9Positive: event.item9_positive },
+        ]
         break
       case 'message':
         if (event.role === 'assistant') {
@@ -701,6 +710,7 @@ export function DoctorVideoCall({
     setSessionMemorySnapshot(newSessionMemory)
 
     setChatHistory([])
+    checkInsRef.current = []
     const langConfig = SUPPORTED_LANGUAGES.find((l) => l.code === selectedLang) || SUPPORTED_LANGUAGES[0]
     toast.success(`Consultation language set: ${langConfig.label} (${langConfig.nativeName})`, {
       icon: '🌐',
@@ -796,6 +806,7 @@ export function DoctorVideoCall({
             : ['Continue the conversation if you have more symptoms, history, or questions to add.']),
         ...(activeTriage < 4 ? ['Seek urgent help if severe chest pain, trouble breathing, fainting, or other sudden severe symptoms occur.'] : []),
       ],
+      checkIns: checkInsRef.current.length ? [...checkInsRef.current] : undefined,
       referralRecommendation:
         activeTriage === 4
           ? 'Urgent emergency care was advised because a possible emergency warning sign was reported.'

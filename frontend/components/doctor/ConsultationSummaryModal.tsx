@@ -53,7 +53,7 @@ ${s.warningSignsIdentified.length ? s.warningSignsIdentified.map((x) => `! ${x}`
 RECOMMENDED NEXT STEPS:
 ${s.recommendedNextSteps.map((x) => `[ ] ${x}`).join('\n')}
 
-HUMAN DOCTOR REFERRAL:
+${s.checkIns?.length ? `CHECK-IN QUESTIONNAIRES (screening only, not a diagnosis):\n${s.checkIns.map((c) => `• ${c.name}: ${c.score === null ? 'stopped early' : `${c.score}/${c.max}`}, ${c.bandLabel}`).join('\n')}\n\n` : ''}HUMAN DOCTOR REFERRAL:
 ${s.referralRecommendation}
 
 DISCLAIMER:
@@ -77,6 +77,12 @@ function buildPrintHtml(s: ConsultationSummaryData): string {
   const warnings = s.warningSignsIdentified.length
     ? `<h2>Warning signs identified</h2><ul>${s.warningSignsIdentified
         .map((x) => `<li>${e(x)}</li>`)
+        .join('')}</ul>`
+    : ''
+
+  const checkIns = s.checkIns?.length
+    ? `<h2>Check-in questionnaires (screening only, not a diagnosis)</h2><ul>${s.checkIns
+        .map((c) => `<li><b>${e(c.name)}</b>: ${c.score === null ? 'stopped early' : `${c.score}/${c.max}`}, ${e(c.bandLabel)}</li>`)
         .join('')}</ul>`
     : ''
 
@@ -116,6 +122,7 @@ function buildPrintHtml(s: ConsultationSummaryData): string {
   <ul>${s.recommendedNextSteps.map((x) => `<li>${e(x)}</li>`).join('')}</ul>
   <h2>Human doctor referral</h2>
   <p>${e(s.referralRecommendation)}</p>
+  ${checkIns}
   <div class="disclaimer"><b>Medical AI disclaimer:</b> ${e(s.disclaimer)}</div>
 </body></html>`
 }
@@ -389,6 +396,24 @@ export function ConsultationSummaryModal({
               ))}
             </ol>
           </Section>
+
+          {/* Check-in questionnaires run by Dr. Ananya */}
+          {summary.checkIns && summary.checkIns.length > 0 && (
+            <Section icon={CheckCircle2} title="Check-in questionnaires">
+              <ul className="space-y-2 rounded-xl border border-clinic-hairline bg-clinic-porcelain p-3.5 text-xs text-clinic-ink">
+                {summary.checkIns.map((c) => (
+                  <li key={c.name}>
+                    <span className="font-semibold">{c.name}</span>
+                    {': '}
+                    {c.score === null ? 'stopped early' : `${c.score} out of ${c.max}`}
+                    {', '}
+                    {c.bandLabel}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] text-clinic-muted">Screening only. This is not a diagnosis.</p>
+            </Section>
+          )}
 
           {/* Human doctor referral */}
           <div className="flex items-start gap-2.5 rounded-xl border border-clinic-hairline bg-clinic-mist/60 p-3.5">

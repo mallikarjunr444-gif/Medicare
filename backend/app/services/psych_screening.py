@@ -183,6 +183,7 @@ def offer_text(scale_id: str) -> str:
 class Step:
     reply: str
     crisis: bool = False
+    result: dict | None = None  # set once, when a questionnaire ends with something to save
 
 
 def new_state() -> dict:
@@ -301,9 +302,11 @@ def handle(state: dict, text: str, language: str = "en") -> Step | None:
     state["answers"].append(value)
     if scale.id == "phq9" and index == 8 and value > 0:
         state.update(phase="done", done=True, context_note="CHECK-IN: the user answered yes to thoughts of self-harm on the PHQ-9. Stay with them warmly and encourage immediate human support (112, Tele-MANAS 14416).")
-        return Step(psych_safety.crisis_reply(language), crisis=True)
+        record = {"scale": "phq9", "name": "PHQ-9", "score": None, "max": 27, "band": "stopped_item9", "band_label": "Stopped at question 9: thoughts of self-harm reported", "answers": list(state["answers"]), "item9_positive": True}
+        return Step(psych_safety.crisis_reply(language), crisis=True, result=record)
     if len(state["answers"]) < len(scale.items):
         return Step(_ask(scale, len(state["answers"])))
     raw, band_key, band = _score(scale, state["answers"])
     state.update(phase="done", done=True, result={"scale": scale.id, "score": raw, "band": band_key}, context_note=_context_note(scale, raw, band))
-    return Step(_summary(scale, raw, band_key, band))
+    record = {"scale": scale.id, "name": scale.name, "score": raw, "max": _MAX[scale.id], "band": band_key, "band_label": band, "answers": list(state["answers"]), "item9_positive": False}
+    return Step(_summary(scale, raw, band_key, band), result=record)
