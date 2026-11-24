@@ -15,8 +15,8 @@ from typing import Dict, List, Optional
 from fastapi import WebSocket
 
 from app.config import settings
+from app.services import psych_safety, psych_screening
 from app.services.animator import avatar_animator
-from app.services import psych_safety
 from app.services.llm import (
     LLMAuthError,
     LLMError,
@@ -856,6 +856,9 @@ class ConnectionManager:
             )
             selected_language = _normalize_language_code(data.get("language", "en"))
             language_instruction = _language_instruction(selected_language)
+            check_in_note = (data.get("screening") or {}).get("context_note")
+            if check_in_note and data.get("doctor_id") == "dr_ananya":
+                system_prompt = f"{system_prompt}\n\n{check_in_note}" if system_prompt else check_in_note
 
             # ── 1. Deterministic Clinical Safety & Emergency Evaluation ─────
             from app.services.safety_service import medical_safety_validator
@@ -908,6 +911,14 @@ class ConnectionManager:
                 await greeting_queue.put(None)
                 await self._animate_from_queue(session_id, greeting_queue)
                 return
+
+            # ── 1b. Dr. Ananya's automatic check-in questionnaires (consent-based, deterministic) ──
+            screening = data.setdefault("screening", psych_screening.new_state())
+            if data.get("doctor_id") == "dr_ananya":
+                step = psych_screening.handle(screening, text, selected_language)
+                if step is not None:
+                    await self._say_canned(session_id, data, messages, text, step.reply, started_at, crisis=step.crisis)
+                    return
 
             # ── 2. Shared medical + wellness reference retrieval ───────────
             from app.services.rag_service import rag_service
@@ -1031,6 +1042,11 @@ class ConnectionManager:
                 data["messages"] = messages
                 latency = (datetime.now(timezone.utc) - started_at).total_seconds()
                 await self._persist_message(session_id, "assistant", response_text, latency=latency)
+                if data.get("doctor_id") == "dr_ananya" and psych_screening.should_offer(
+                    data["screening"], text, selected_language, _is_social_greeting(text)
+                ):
+                    # After listening and replying, ask (never start without a yes).
+                    await self._say_canned(session_id, data, messages, None, psych_screening.make_offer(data["screening"]), started_at)
 
         except LLMError as e:
             logger.error(f"Text turn LLM error [{session_id}]: {type(e).__name__}: {e}")
@@ -1038,6 +1054,35 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Text error [{session_id}]: {e}")
             await self.send_message(session_id, {"type": "error", "message": "Processing failed"})
+
+    async def _say_canned(
+        self,
+        session_id: str,
+        data: dict,
+        messages: List[dict],
+        user_text: Optional[str],
+        reply: str,
+        started_at: datetime,
+        crisis: bool = False,
+    ) -> None:
+        """Send a fixed reply as the doctor (spoken and animated like a normal one).
+
+        `user_text` is None when the reply is a follow-up to a turn that was already stored."""
+        if user_text is not None:
+            await self._persist_message(session_id, "user", user_text)
+            await self._ensure_conversation_title(session_id, user_text)
+        payload: dict[str, object] = {"type": "message", "content": reply, "role": "assistant"}
+        if crisis:
+            payload.update(triage=4, is_emergency=True)
+        await self.send_message(session_id, payload)
+        messages.append({"role": "assistant", "content": reply})
+        data["messages"] = messages
+        latency = (datetime.now(timezone.utc) - started_at).total_seconds()
+        await self._persist_message(session_id, "assistant", reply, latency=latency)
+        queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        await queue.put(reply)
+        await queue.put(None)
+        await self._animate_from_queue(session_id, queue)
 
     # ── streaming pipeline ────────────────────────────────────────────────────
 
