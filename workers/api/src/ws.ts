@@ -92,18 +92,45 @@ export function modelChain(env: Env, language: string): string[] {
   return [...new Set([primary, DEFAULT_MODEL_LARGE, DEFAULT_MODEL])];
 }
 
-/** Reads an SSE stream (Workers AI or OpenAI-style) and returns the full text. */
+const ABORTED = Symbol("aborted");
+const STALL_MS = 12_000;
+const TURN_MS = 40_000;
+
+/**
+ * Waits for `work`, but never forever: rejects with a transient AiError("ai_timeout") after `ms`, and resolves
+ * ABORTED as soon as the turn is interrupted. Without this, one stalled model call held the per-session lock and
+ * every later message queued behind it ("connected, but no reply").
+ */
+export function guarded<T>(work: Promise<T>, ms: number, signal: { aborted: boolean }): Promise<T | typeof ABORTED> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => (done(), reject(new AiError("ai_timeout"))), Math.max(1, ms));
+    const poll = setInterval(() => signal.aborted && (done(), resolve(ABORTED)), 100);
+    const done = () => (clearTimeout(timer), clearInterval(poll));
+    work.then((v) => (done(), resolve(v)), (e) => (done(), reject(e)));
+  });
+}
+
+/** Reads an SSE stream (Workers AI or OpenAI-style) and returns the full text. Throws ai_timeout if the model goes silent. */
 export async function readSse(
   stream: ReadableStream<Uint8Array>,
   onToken: (t: string) => void,
   signal: { aborted: boolean },
+  stallMs = STALL_MS,
 ): Promise<string> {
   const reader = stream.getReader();
   const dec = new TextDecoder();
   let buf = "";
   let full = "";
   while (!signal.aborted) {
-    const { value, done } = await reader.read();
+    let r: ReadableStreamReadResult<Uint8Array> | typeof ABORTED;
+    try {
+      r = await guarded(reader.read(), stallMs, signal);
+    } catch (e) {
+      void reader.cancel().catch(() => {});
+      throw e;
+    }
+    if (r === ABORTED) break;
+    const { value, done } = r;
     if (done) break;
     buf += dec.decode(value, { stream: true });
     let i: number;
@@ -124,7 +151,7 @@ export async function readSse(
       }
     }
   }
-  if (signal.aborted) await reader.cancel().catch(() => {});
+  if (signal.aborted) void reader.cancel().catch(() => {}); // do not await: cancelling a stuck stream can hang too
   return full;
 }
 
@@ -150,7 +177,7 @@ export function classifyAiError(e: unknown): AiErrorKind {
   if (msg.includes("ai_not_configured") || msg.includes("ai_binding_missing") || status === 401 || status === 403 || status === 404) return "config";
   if (/daily|allocation|neurons|quota|insufficient|billing|exceeded your|4006/.test(msg)) return "quota";
   if (status && [500, 502, 503, 504, 429].includes(status)) return "transient";
-  if (/capacity|overload|temporar|timeout|timed out|network|fetch failed|unavailable|try again|internal|3040|\b(429|500|502|503|504)\b/.test(msg)) return "transient";
+  if (/ai_timeout|capacity|overload|temporar|timeout|timed out|network|fetch failed|unavailable|try again|internal|3040|\b(429|500|502|503|504)\b/.test(msg)) return "transient";
   return "other";
 }
 
@@ -165,11 +192,13 @@ async function streamWorkersAi(
   signal: { aborted: boolean },
 ): Promise<string> {
   if (!env.AI) throw new Error("ai_binding_missing");
+  const stallMs = Number(env.AI_STALL_MS) || STALL_MS;
   let lastErr: unknown;
   for (const model of modelChain(env, language)) {
     try {
-      const out: any = await env.AI.run(model, { messages, stream: true, max_tokens: 320, temperature: 0.6 });
-      return await readSse(out as ReadableStream<Uint8Array>, onToken, signal);
+      const out: any = await guarded(env.AI.run(model, { messages, stream: true, max_tokens: 320, temperature: 0.6 }), stallMs, signal);
+      if (out === ABORTED) return "";
+      return await readSse(out as ReadableStream<Uint8Array>, onToken, signal, stallMs);
     } catch (e) {
       lastErr = e;
       if (!isModelGone(e)) throw e;
@@ -187,23 +216,31 @@ async function streamOpenAiCompatible(
   messages: Chat[],
   onToken: (t: string) => void,
   signal: { aborted: boolean },
+  stallMs = STALL_MS,
 ): Promise<string> {
-  const res = await fetch(`${cfg.base.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${cfg.key}` },
-    body: JSON.stringify({ model: cfg.model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.base.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.key}` },
+      body: JSON.stringify({ model: cfg.model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
+      signal: AbortSignal.timeout(stallMs), // time to the first response headers
+    });
+  } catch (e) {
+    if ((e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError") throw new AiError("ai_timeout");
+    throw e;
+  }
   if (!res.ok || !res.body) {
     const ra = Number(res.headers.get("retry-after"));
     throw new AiError(`external_ai_${res.status}`, res.status, Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined);
   }
-  return readSse(res.body, onToken, signal);
+  return readSse(res.body, onToken, signal, stallMs);
 }
 
 async function streamExternal(env: Env, messages: Chat[], language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
   const model = (language === "kn" || language === "hi" ? env.AI_MODEL_LARGE_EXTERNAL : env.AI_MODEL_EXTERNAL) ||
     env.AI_MODEL_EXTERNAL || "llama-3.3-70b-versatile";
-  return streamOpenAiCompatible({ base: env.AI_BASE_URL || "https://api.groq.com/openai/v1", key: env.AI_API_KEY!, model }, messages, onToken, signal);
+  return streamOpenAiCompatible({ base: env.AI_BASE_URL || "https://api.groq.com/openai/v1", key: env.AI_API_KEY!, model }, messages, onToken, signal, Number(env.AI_STALL_MS) || STALL_MS);
 }
 
 /** Optional second external provider (default OpenRouter), used only when the primary one has failed. */
@@ -211,7 +248,7 @@ async function streamBackup(env: Env, messages: Chat[], _language: string, onTok
   return streamOpenAiCompatible({
     base: env.AI_FALLBACK_BASE_URL || "https://openrouter.ai/api/v1", key: env.AI_FALLBACK_API_KEY!,
     model: env.AI_FALLBACK_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
-  }, messages, onToken, signal);
+  }, messages, onToken, signal, Number(env.AI_STALL_MS) || STALL_MS);
 }
 
 /** Uses the external provider when configured (much larger free limits), with Workers AI as fallback. */
@@ -227,11 +264,14 @@ export async function streamAi(
   if (env.AI_FALLBACK_API_KEY) order.push(streamBackup);
   if (env.AI) order.push(streamWorkersAi);
   if (!order.length) throw new Error("ai_not_configured");
-  const attempts = Math.max(1, Number(env.AI_MAX_ATTEMPTS) || 3);
+  // With a fallback provider available, fail over after 2 tries instead of burning the whole budget on one.
+  const attempts = Math.max(1, Number(env.AI_MAX_ATTEMPTS) || (order.length > 1 ? 2 : 3));
+  const deadline = Date.now() + (Number(env.AI_TURN_MS) || TURN_MS);
   let lastErr: unknown;
   for (const provider of order) {
     let emitted = false;
     for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (Date.now() >= deadline) throw new AiError("ai_timeout");
       try {
         return await provider(env, messages, language, (t) => ((emitted = true), onToken(t)), signal);
       } catch (e) {
@@ -241,11 +281,33 @@ export async function streamAi(
         if (classifyAiError(e) !== "transient" || attempt === attempts) break;
         const base = Math.min(4000, 400 * 2 ** (attempt - 1));
         const wait = Math.min(8000, (e as AiError).retryAfterMs ?? base + Math.random() * base * 0.5);
+        if (Date.now() + wait >= deadline) throw new AiError("ai_timeout"); // out of time: answer with an error now, not later
         await sleep(env.AI_RETRY_DELAY_MS === "0" ? 0 : wait);
       }
     }
   }
   throw lastErr;
+}
+
+/**
+ * Providers differ in what they accept, and several reject two user turns in a row or a history that starts with the
+ * assistant. A failed turn leaves exactly that behind (the patient's message with no reply), so one failure made every
+ * later turn fail too. Merge same-role neighbours and drop a leading assistant message.
+ */
+export function normaliseHistory(messages: Chat[]): Chat[] {
+  const out: Chat[] = [];
+  for (const m of messages) {
+    const text = String(m.content ?? "").trim();
+    if (!text) continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.role === m.role && m.role !== "system") prev.content += `\n${text}`;
+    else out.push({ role: m.role, content: text });
+  }
+  // First conversational turn must be the patient's: skip any assistant message after the system prompt(s).
+  let i = 0;
+  while (out[i]?.role === "system") i++;
+  while (out[i]?.role === "assistant") out.splice(i, 1);
+  return out;
 }
 
 export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Query, sessionId: string) {
@@ -294,7 +356,8 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   const doctorId: string = session.meta?.doctor_id in DOCTORS ? session.meta.doctor_id : "dr_arjun";
   let language = "en";
   let turn = { aborted: false };
-  let busy = false;
+  // Which turn currently owns the doctor. An owner (not a bare flag) so a stuck turn can never lock the session.
+  let owner: object | null = null;
 
   server.addEventListener("message", (ev: MessageEvent) => {
     let data: any;
@@ -344,21 +407,27 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   let lastObserved = 0;
   async function observe(image: unknown) {
     const now = Date.now();
-    if (busy || !env.AI || typeof image !== "string" || now - lastObserved < 15_000) return;
+    if (owner || !env.AI || typeof image !== "string" || now - lastObserved < 15_000) return;
     const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(image);
     if (!m || m[1].length > 200_000) return;
     lastObserved = now;
-    busy = true;
     const mine = { aborted: false };
+    owner = mine;
     try {
       const bin = atob(m[1]);
       const bytes = Array.from({ length: bin.length }, (_, i) => bin.charCodeAt(i));
-      const v: any = await env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
-        image: bytes,
-        max_tokens: 60,
-        prompt:
-          "USER: This is a still frame from a patient's video consultation. In one short sentence, describe only what a doctor would clearly notice: a face showing pain or distress, holding a body part, visible redness or swelling, pale or sweaty look, slumped posture, or coughing. Do not guess or diagnose. If nothing stands out, answer exactly NONE.\nASSISTANT:",
-      });
+      // Optional feature: if the vision model is slow, give up quickly so the patient's next message is not held up.
+      const v: any = await guarded(
+        env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
+          image: bytes,
+          max_tokens: 60,
+          prompt:
+            "USER: This is a still frame from a patient's video consultation. In one short sentence, describe only what a doctor would clearly notice: a face showing pain or distress, holding a body part, visible redness or swelling, pale or sweaty look, slumped posture, or coughing. Do not guess or diagnose. If nothing stands out, answer exactly NONE.\nASSISTANT:",
+        }),
+        8000,
+        mine,
+      );
+      if (v === ABORTED) return;
       const seen = String(v?.description ?? v?.response ?? "").trim();
       if (!seen || /^none\b/i.test(seen) || seen.length < 8) return;
       const hist = (
@@ -366,7 +435,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       ).reverse() as Chat[];
       const lang = LANGS[language] ?? language;
       const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-2 short sentences, no markdown.\nYou can see the patient on camera. A camera check noted (it may be wrong): "${seen}". Gently mention what you noticed and ask how they are feeling or if something hurts. Never state a diagnosis. Do not mention cameras or AI analysis.`;
-      const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist, { role: "user", content: "(The patient is quietly on camera.)" }], language, (t) => send({ type: "token", token: t }), mine);
+      const reply = await streamAi(env, [{ role: "system", content: sys }, ...normaliseHistory([...hist, { role: "user", content: "(The patient is quietly on camera.)" }])], language, (t) => send({ type: "token", token: t }), mine);
       const content = validateAiResponse(reply.trim());
       if (!content) return;
       await sendVoice(content, mine);
@@ -375,7 +444,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
     } catch (e) {
       console.error("ws_observe_failed", String((e as Error).message).slice(0, 160)); // silent: observing is optional
     } finally {
-      busy = false;
+      if (owner === mine) owner = null;
     }
   }
 
@@ -394,8 +463,10 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   }
 
   async function run(text: string, mine: { aborted: boolean }) {
-    while (busy) await new Promise((r) => setTimeout(r, 25));
-    busy = true;
+    // Wait briefly for the previous turn (barge-in aborts it), but never forever: after 15 s take over.
+    const until = Date.now() + 15_000;
+    while (owner && owner !== mine && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+    owner = mine;
     try {
       const gate = await chatAllowed(query, uid!, env);
       if (gate !== "ok") {
@@ -433,7 +504,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       })();
       const [, prior, searchText] = await Promise.all([saveUser, loadHist, translate]);
       // The history was read before the new message landed, so add it here (kept out of the DB race).
-      const hist = [...(prior as Chat[]).reverse(), { role: "user", content: text } as Chat];
+      const hist = normaliseHistory([...(prior as Chat[]).reverse(), { role: "user", content: text } as Chat]);
       // Deterministic emergency escalation runs before any AI reply (same rules as the Python service).
       const triage = [text, searchText].map(evaluatePatientQuery).find((t) => t.is_emergency);
       if (triage) {
@@ -461,8 +532,9 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         content,
       ]);
     } catch (e) {
-      console.error("ws_turn_failed", String((e as Error).message).slice(0, 200));
       const kind = classifyAiError(e);
+      // One structured line per failure: `wrangler tail` shows exactly why a reply failed.
+      console.error("ws_turn_failed", JSON.stringify({ kind, status: (e as AiError).status ?? null, lang: language, doctor: doctorId, error: String((e as Error).message).slice(0, 200) }));
       send({
         type: "error",
         code: kind === "quota" ? "ai_quota" : kind === "transient" ? "ai_busy" : kind === "config" ? "ai_unconfigured" : "ai_error",
@@ -477,7 +549,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
                 : "Something went wrong while preparing the reply. Your call is still connected; please try again.",
       });
     } finally {
-      busy = false;
+      if (owner === mine) owner = null;
     }
   }
 

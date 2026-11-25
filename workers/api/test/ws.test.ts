@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { normaliseLanguage, modelFor, modelChain, DEFAULT_MODEL, DEFAULT_MODEL_LARGE, isModelGone, retrieve, searchTerms, streamAi, AiError, classifyAiError } from "../src/ws";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { normaliseLanguage, modelFor, modelChain, DEFAULT_MODEL, DEFAULT_MODEL_LARGE, isModelGone, retrieve, searchTerms, streamAi, AiError, classifyAiError, readSse, guarded, normaliseHistory } from "../src/ws";
 
 const sse = (lines: string[]) =>
   new ReadableStream<Uint8Array>({
@@ -261,5 +261,105 @@ describe("server voice (kn / hi / en)", () => {
       await expect(synthesizeSpeech({} as any, "hello", "en", "dr_arjun", 20)).rejects.toThrow("tts_timeout");
       expect(await synthesizeSpeech({ TTS_PROVIDER: "off" } as any, "hello", "en", "dr_arjun")).toEqual([]);
     } finally { globalThis.fetch = orig; }
+  });
+});
+
+
+// A stream that never produces data, like a model call that has stalled.
+const silent = () => new ReadableStream<Uint8Array>({ start() {} });
+const good = (word: string) => sse([`data: {"response":"${word}"}`, "data: [DONE]"]);
+const t0 = () => Date.now();
+
+describe("a stalled model can no longer hang a reply", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("readSse gives up on a silent stream with a retryable ai_timeout", async () => {
+    const start = t0();
+    const err: any = await readSse(silent(), () => {}, { aborted: false }, 80).catch((e) => e);
+    expect(err).toBeInstanceOf(AiError);
+    expect(err.message).toBe("ai_timeout");
+    expect(classifyAiError(err)).toBe("transient");
+    expect(t0() - start).toBeLessThan(1000);
+  });
+
+  it("readSse stops promptly when the patient interrupts, even mid-stall", async () => {
+    const signal = { aborted: false };
+    setTimeout(() => (signal.aborted = true), 120);
+    const start = t0();
+    const out = await readSse(silent(), () => {}, signal, 60_000);
+    expect(out).toBe("");
+    expect(t0() - start).toBeLessThan(1500); // not the 60 s stall limit
+  });
+
+  it("guarded resolves, rejects on timeout, or reports an abort", async () => {
+    expect(await guarded(Promise.resolve(7), 500, { aborted: false })).toBe(7);
+    await expect(guarded(new Promise(() => {}), 50, { aborted: false })).rejects.toThrow("ai_timeout");
+    const s = { aborted: false };
+    setTimeout(() => (s.aborted = true), 50);
+    expect(typeof (await guarded(new Promise(() => {}), 5000, s))).toBe("symbol");
+  });
+
+  it("fails over from a hung external provider to Workers AI", async () => {
+    vi.stubGlobal("fetch", async () => new Response(silent(), { status: 200 }));
+    const env: any = { AI_API_KEY: "k", AI_STALL_MS: "80", AI_MAX_ATTEMPTS: "1", AI_RETRY_DELAY_MS: "0", AI: { run: async () => good("Hello") } };
+    const start = t0();
+    const full = await streamAi(env, [{ role: "user", content: "hi" }], "en", () => {}, { aborted: false });
+    expect(full).toBe("Hello");
+    expect(t0() - start).toBeLessThan(2000);
+  });
+
+  it("fails over when Workers AI itself hangs before returning a stream", async () => {
+    vi.stubGlobal("fetch", async () => new Response(good("Backup"), { status: 200 }));
+    const env: any = { AI_API_KEY: "k", AI_FALLBACK_API_KEY: "k2", AI_STALL_MS: "80", AI_MAX_ATTEMPTS: "1", AI_RETRY_DELAY_MS: "0", AI: { run: () => new Promise(() => {}) } };
+    // external succeeds first here, so make it fail to prove the chain reaches the next healthy provider
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => (++calls === 1 ? new Response("{}", { status: 503 }) : new Response(good("Backup"), { status: 200 })));
+    const full = await streamAi(env, [{ role: "user", content: "hi" }], "en", () => {}, { aborted: false });
+    expect(full).toBe("Backup");
+  });
+
+  it("caps the whole reply: every provider hanging still ends in a fast, retryable error", async () => {
+    vi.stubGlobal("fetch", async () => new Response(silent(), { status: 200 }));
+    const env: any = { AI_API_KEY: "k", AI_STALL_MS: "300", AI_TURN_MS: "400", AI_MAX_ATTEMPTS: "3", AI_RETRY_DELAY_MS: "0", AI: { run: () => new Promise(() => {}) } };
+    const start = t0();
+    const err: any = await streamAi(env, [{ role: "user", content: "hi" }], "en", () => {}, { aborted: false }).catch((e) => e);
+    expect(classifyAiError(err)).toBe("transient");
+    expect(t0() - start).toBeLessThan(3000);
+  });
+
+  it("does not switch provider after tokens were already sent to the patient", async () => {
+    const half = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('data: {"response":"Par"}\n')); } });
+    vi.stubGlobal("fetch", async () => new Response(half, { status: 200 }));
+    const env: any = { AI_API_KEY: "k", AI_STALL_MS: "80", AI_MAX_ATTEMPTS: "1", AI: { run: async () => good("Other") } };
+    const got: string[] = [];
+    await expect(streamAi(env, [{ role: "user", content: "hi" }], "en", (t) => got.push(t), { aborted: false })).rejects.toThrow("ai_timeout");
+    expect(got).toEqual(["Par"]); // no second voice mixed into the same reply
+  });
+});
+
+describe("normaliseHistory", () => {
+  it("merges consecutive same-role messages left behind by a failed turn", () => {
+    expect(normaliseHistory([
+      { role: "user", content: "Yea U test me" },
+      { role: "assistant", content: "I'm here to support you." },
+      { role: "user", content: "ok" },
+      { role: "user", content: "ok" },
+    ])).toEqual([
+      { role: "user", content: "Yea U test me" },
+      { role: "assistant", content: "I'm here to support you." },
+      { role: "user", content: "ok\nok" },
+    ]);
+  });
+  it("drops a leading assistant message and empty messages, keeps the system prompt", () => {
+    expect(normaliseHistory([
+      { role: "system", content: "s" },
+      { role: "assistant", content: "cut off by the history window" },
+      { role: "user", content: "  " },
+      { role: "user", content: "hello" },
+    ])).toEqual([{ role: "system", content: "s" }, { role: "user", content: "hello" }]);
+  });
+  it("leaves a clean alternating history untouched", () => {
+    const h = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }] as const;
+    expect(normaliseHistory([...h] as any)).toEqual(h);
   });
 });

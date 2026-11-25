@@ -304,6 +304,7 @@ export function DoctorVideoCall({
         break
       case 'message':
         if (event.role === 'assistant') {
+          setAiNotice(null) // the doctor answered, so any earlier "unavailable" notice is stale
           const pendingClinicalMeta = pendingClinicalMetaRef.current
           const triage = event.triage || pendingClinicalMeta?.triage
           const streamedId = streamedDoctorMessageIdRef.current

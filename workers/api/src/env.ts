@@ -26,6 +26,10 @@ export interface Env {
   AI_MODEL_EXTERNAL?: string;
   AI_MODEL_LARGE_EXTERNAL?: string;
   AI_MAX_ATTEMPTS?: string;
+  /** Milliseconds of silence from a model before it counts as stuck (default 12000). */
+  AI_STALL_MS?: string;
+  /** Hard cap for one reply across all providers and retries (default 40000). */
+  AI_TURN_MS?: string;
   AI_RETRY_DELAY_MS?: string;
   // Comma-separated emails treated as psychologists (in addition to users.is_psychologist)
   PSYCHOLOGIST_EMAILS?: string;
