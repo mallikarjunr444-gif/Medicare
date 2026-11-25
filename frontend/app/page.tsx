@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import {
   CalendarDays,
@@ -16,6 +16,11 @@ import {
   X,
 } from 'lucide-react'
 import { SiteNav } from '@/components/site/SiteNav'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { SignInDialog } from '@/components/auth/SignInDialog'
+import { UserMenu } from '@/components/auth/UserMenu'
+import { ProfilePage } from '@/components/profile/ProfilePage'
+import { useAuth } from '@/lib/auth/AuthProvider'
 import { ScrollProgress } from '@/components/ui/scroll-progress'
 import { ClosingCta, DoctorTiles, Faq, FeatureTiles, Hero, HowItWorks, Safety, SiteFooter } from '@/components/site/HomeSections'
 import { CompareDoctors, HighlightChips, HighlightsGallery, LanguageViewer, LocalNav } from '@/components/site/ProductSections'
@@ -59,7 +64,7 @@ function PanelLoader({ label }: Readonly<{ label: string }>) {
   )
 }
 
-type View = 'home' | 'patient' | 'consultation' | 'psychology' | 'wellness' | 'chat' | 'notes' | 'appointments' | 'history' | 'settings' | 'admin'
+type View = 'home' | 'profile' | 'patient' | 'consultation' | 'psychology' | 'wellness' | 'chat' | 'notes' | 'appointments' | 'history' | 'settings' | 'admin'
 
 const navItems: { id: View; icon: typeof HeartPulse; label: string }[] = [
   { id: 'home', icon: HeartPulse, label: 'Home' },
@@ -74,10 +79,16 @@ const navItems: { id: View; icon: typeof HeartPulse; label: string }[] = [
   { id: 'settings', icon: Settings, label: 'Settings' },
 ]
 
-const mobileMoreItems = navItems.filter(({ id }) => ['home', 'notes', 'appointments', 'settings', 'admin'].includes(id))
+const mobileMoreItems: typeof navItems = [
+  ...navItems.filter(({ id }) => ['home', 'notes', 'appointments', 'settings', 'admin'].includes(id)),
+  { id: 'profile', icon: UserRound, label: 'Profile' },
+]
 
 export default function Home() {
   const { isAuthenticated, setAuth, user } = useStore()
+  const { profile } = useAuth()
+  const [signInOpen, setSignInOpen] = useState(false)
+  const closeSignIn = useCallback(() => setSignInOpen(false), [])
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorId>('dr_arjun')
   const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
@@ -135,6 +146,7 @@ export default function Home() {
           appLinks={navItems.map(({ id, label }) => ({ id, label }))}
           onNavigate={(id) => navigate(id as View)}
           onStart={() => navigate('consultation')}
+          account={<UserMenu onSignIn={() => setSignInOpen(true)} onNavigate={navigate} />}
         />
       )}
 
@@ -153,20 +165,32 @@ export default function Home() {
         )}
 
         {view === 'patient' && (
-          <PatientDashboard
-            displayName={user?.full_name || user?.username || 'Patient'}
-            isGuest={Boolean(user?.is_guest)}
-            onNavigate={navigate}
-          />
+          <AuthGuard what="your care dashboard">
+            <PatientDashboard
+              displayName={profile?.full_name || user?.full_name || user?.username || 'Patient'}
+              isGuest={!profile}
+              email={profile?.email}
+              photoUrl={profile?.photo_url}
+              onNavigate={navigate}
+            />
+          </AuthGuard>
+        )}
+
+        {view === 'profile' && (
+          <AuthGuard what="your profile">
+            <ProfilePage />
+          </AuthGuard>
         )}
 
         {view === 'notes' && <PatientNotesPanel />}
 
         {view === 'appointments' && (
-          <AppointmentWorkspace
-            onRequestAppointment={() => setAppointmentDialogOpen(true)}
-            latestRequest={latestAppointmentRequest}
-          />
+          <AuthGuard what="your appointments">
+            <AppointmentWorkspace
+              onRequestAppointment={() => setAppointmentDialogOpen(true)}
+              latestRequest={latestAppointmentRequest}
+            />
+          </AuthGuard>
         )}
 
         {view === 'home' && (
@@ -189,8 +213,8 @@ export default function Home() {
         )}
 
         {view === 'chat' && selectedAvatar && <PageFrame eyebrow="Conversation" title="Live conversation" description="Continue your text and voice session."><ChatInterface key={`${selectedAvatar}:${resumeSessionId ?? 'new'}`} avatarId={selectedAvatar} resumeSessionId={resumeSessionId ?? undefined} onSessionCreated={() => undefined} /></PageFrame>}
-        {view === 'history' && <HistoryPanel onResume={handleResumeFromHistory} />}
-        {view === 'settings' && <SettingsPanel />}
+        {view === 'history' && <AuthGuard what="your consultation history"><HistoryPanel onResume={handleResumeFromHistory} /></AuthGuard>}
+        {view === 'settings' && <AuthGuard what="your settings"><SettingsPanel /></AuthGuard>}
         {view === 'admin' && <div className="min-h-[calc(100dvh-3rem)] bg-[#f5f5f7]"><AdminKnowledgeDashboard /></div>}
       </main>
 
@@ -226,6 +250,8 @@ export default function Home() {
           </nav>
         </>
       )}
+
+      {signInOpen && <SignInDialog onClose={closeSignIn} />}
 
       <SpecialistBookingModal
         isOpen={appointmentDialogOpen}

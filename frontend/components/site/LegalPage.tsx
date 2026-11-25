@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 export interface LegalSection {
@@ -21,13 +22,13 @@ export function LegalPage({ title, summary, updated, sections }: LegalPageProps)
     <div className="min-h-[100dvh] bg-white text-[#1d1d1f]">
       <header className="sticky top-0 z-50 border-b border-black/[0.08] bg-white/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl backdrop-saturate-150">
         <div className="mx-auto flex h-12 max-w-[1240px] items-center justify-between gap-4 px-4 sm:px-6">
-          <a href="/" className="rounded focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30" aria-label="MediCare home">
+          <Link href="/" className="rounded focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30" aria-label="MediCare home">
             <span className="block text-[21px] font-semibold leading-none tracking-[-0.045em]">MediCare</span>
-          </a>
+          </Link>
           <nav aria-label="Legal" className="flex items-center gap-1 text-[13px]">
             <a href="/terms" className="rounded-full px-3 py-1.5 text-[#1d1d1f]/80 hover:text-[#1d1d1f]">Terms</a>
             <a href="/privacy" className="rounded-full px-3 py-1.5 text-[#1d1d1f]/80 hover:text-[#1d1d1f]">Privacy</a>
-            <a href="/" className="ml-1 inline-flex h-8 items-center rounded-full bg-[#0071e3] px-4 text-white hover:bg-[#0077ed]">Home</a>
+            <Link href="/" className="ml-1 inline-flex h-8 items-center rounded-full bg-[#0071e3] px-4 text-white hover:bg-[#0077ed]">Home</Link>
           </nav>
         </div>
       </header>

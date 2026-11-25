@@ -450,7 +450,7 @@ export function AdminKnowledgeDashboard() {
               <div>
                 <p className="text-[10px] uppercase tracking-[0.18em] text-[#8fc9bd] font-semibold">Specialist library</p>
                 <h2 className="text-lg font-bold mt-1">Feed Dr. Ananya a psychology book</h2>
-                <p className="text-xs text-[#b8c8c8] mt-1">Text is read in your browser (text-based PDFs, TXT or MD) and saved as searchable passages in the mental_wellness collection. Scanned books need OCR and aren't supported yet.</p>
+                <p className="text-xs text-[#b8c8c8] mt-1">Text is read in your browser (text-based PDFs, TXT or MD) and saved as searchable passages in the mental_wellness collection. Scanned books need OCR and aren&apos;t supported yet.</p>
               </div>
               <Brain size={22} className="text-[#8fc9bd] shrink-0" />
             </div>

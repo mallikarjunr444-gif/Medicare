@@ -83,3 +83,38 @@ export interface ApiError {
   }
   message?: string
 }
+
+export type Gender = 'female' | 'male' | 'non_binary' | 'other' | 'prefer_not_to_say'
+
+/** The signed-in user's profile as stored in Neon (keyed by Firebase UID). */
+export interface UserProfile {
+  id: string
+  firebase_uid: string | null
+  full_name: string | null
+  email: string
+  photo_url: string | null
+  phone: string | null
+  date_of_birth: string | null
+  gender: Gender | null
+  is_guest: boolean
+  created_at: string | null
+  updated_at: string | null
+  last_login_at: string | null
+}
+
+export type ProfileUpdate = Partial<Pick<UserProfile, 'full_name' | 'phone' | 'date_of_birth' | 'gender'>>
+
+export interface ConsultationItem {
+  id: string
+  status: string
+  doctor_name: string
+  doctor_id: string | null
+  title: string | null
+  summary: string | null
+  message_count: number
+  triage_level: number | null
+  duration_seconds: number | null
+  has_report: boolean
+  started_at: string | null
+  ended_at: string | null
+}

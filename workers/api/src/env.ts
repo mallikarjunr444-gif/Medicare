@@ -2,6 +2,8 @@ export interface Env {
   // Secrets (wrangler secret put)
   DATABASE_URL: string;
   JWT_SECRET_KEY: string;
+  /** Public Firebase project id (not a secret). Firebase sign-in is disabled while unset. */
+  FIREBASE_PROJECT_ID?: string;
   SENTRY_DSN?: string;
   // Vars
   ENVIRONMENT: string;
@@ -59,4 +61,11 @@ export interface DbUser {
   is_guest: boolean;
   is_psychologist?: boolean;
   created_at: Date | string;
+  firebase_uid?: string | null;
+  photo_url?: string | null;
+  phone?: string | null;
+  date_of_birth?: Date | string | null;
+  gender?: string | null;
+  updated_at?: Date | string | null;
+  last_login_at?: Date | string | null;
 }

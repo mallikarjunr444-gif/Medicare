@@ -1,0 +1,28 @@
+name: Apply DB migrations
+
+# Manual only. Applies workers/api/migrations/*.sql to the Neon database in order.
+# Every file is idempotent and additive (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS): nothing is dropped or overwritten,
+# so running it twice, or against a database that already has the changes, is safe.
+# Needs the DATABASE_URL repository secret (the same Neon connection string the API uses).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: db-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          for f in $(ls workers/api/migrations/*.sql | sort); do
+            echo "Applying $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f "$f"
+          done

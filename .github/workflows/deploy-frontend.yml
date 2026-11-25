@@ -23,6 +23,11 @@ jobs:
       NEXT_PUBLIC_API_URL: https://medicare-api-prod.mallikarjunr444.workers.dev
       NEXT_PUBLIC_WS_URL: wss://medicare-api-prod.mallikarjunr444.workers.dev
       NEXT_PUBLIC_SITE_URL: https://medicare-web.mallikarjunr444.workers.dev
+      # Firebase web config: public identifiers, stored as repository *variables* (Settings > Secrets and variables > Actions > Variables).
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

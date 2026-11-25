@@ -754,7 +754,7 @@ export function DoctorVideoCall({
     setDoctorVideoSrc(null)
 
     const summary: ConsultationSummaryData = {
-      id: `CONS-CKM-${Date.now()}`,
+      id: `CONS-CKM-${new Date().getTime()}`,
       consultationDate: new Date().toLocaleDateString('en-IN', {
         day: '2-digit',
         month: 'short',

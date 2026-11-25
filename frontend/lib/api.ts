@@ -1,11 +1,24 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import type { ConsultationItem, ProfileUpdate, UserProfile } from '@/lib/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const STORAGE_KEY = 'avatar-system-storage'
 
+// Firebase ID tokens live ~1 hour and are refreshed by the Firebase SDK. AuthProvider keeps this cache
+// current (onIdTokenChanged) and registers a provider that can force a refresh, so a long session never
+// sends an expired token. While someone is signed in with Google this always wins over the guest token.
+let firebaseToken: string | null = null
+let firebaseTokenProvider: (() => Promise<string | null>) | null = null
+
+export function setFirebaseAuth(token: string | null, provider: (() => Promise<string | null>) | null) {
+  firebaseToken = token
+  firebaseTokenProvider = provider
+}
+
 function readToken(): string | null {
   if (typeof window === 'undefined') return null
+  if (firebaseToken) return firebaseToken
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return null
@@ -38,9 +51,18 @@ const apiClient = axios.create({
 
 // Request interceptor — attach auth token
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = readToken()
-    if (token) {
+  async (config: InternalAxiosRequestConfig) => {
+    let token: string | null = null
+    if (firebaseTokenProvider) {
+      try {
+        token = await firebaseTokenProvider() // refreshes automatically when close to expiry
+        if (token) firebaseToken = token
+      } catch {
+        token = null
+      }
+    }
+    token = token ?? readToken()
+    if (token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`
     }
     return config
@@ -53,7 +75,8 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      if (typeof window !== 'undefined') {
+      // A signed-in Google user keeps their Firebase session; AuthProvider surfaces the problem instead of wiping state.
+      if (typeof window !== 'undefined' && !firebaseToken) {
         localStorage.removeItem(STORAGE_KEY)
         window.dispatchEvent(new CustomEvent('auth:logout'))
       }
@@ -103,6 +126,27 @@ export const api = {
 
   getProfile: async () => {
     const response = await apiClient.get('/api/v1/users/me')
+    return response.data
+  },
+
+  // Google / Firebase account. The backend derives the user from the verified ID token only.
+  syncFirebaseProfile: async (idToken: string): Promise<{ profile: UserProfile; created: boolean }> => {
+    const response = await apiClient.post('/api/v1/auth/firebase', {}, { headers: { Authorization: `Bearer ${idToken}` } })
+    return response.data
+  },
+
+  getMyProfile: async (): Promise<UserProfile> => {
+    const response = await apiClient.get('/api/v1/profile')
+    return response.data
+  },
+
+  updateMyProfile: async (data: ProfileUpdate): Promise<UserProfile> => {
+    const response = await apiClient.put('/api/v1/profile', data)
+    return response.data
+  },
+
+  getMyConsultations: async (limit = 30): Promise<ConsultationItem[]> => {
+    const response = await apiClient.get('/api/v1/profile/consultations', { params: { limit } })
     return response.data
   },
 

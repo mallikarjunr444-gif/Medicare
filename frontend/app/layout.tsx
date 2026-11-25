@@ -6,6 +6,7 @@ import './globals.css'
 import type { Metadata, Viewport } from 'next'
 import { Toaster } from 'react-hot-toast'
 import { QueryProvider } from '@/components/providers/QueryProvider'
+import { AuthProvider } from '@/lib/auth/AuthProvider'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 // Font variables with standard fallbacks ensuring offline compilation and robust loading
@@ -112,9 +113,11 @@ export default function RootLayout({
           Skip to main content
         </a>
         <QueryProvider>
-          <ErrorBoundary>
-            <div id="app-content">{children}</div>
-          </ErrorBoundary>
+          <AuthProvider>
+            <ErrorBoundary>
+              <div id="app-content">{children}</div>
+            </ErrorBoundary>
+          </AuthProvider>
           <Toaster
             position="top-center"
             containerStyle={{ top: 76 }}

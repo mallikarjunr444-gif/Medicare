@@ -1321,7 +1321,10 @@ export default function MeadowRiseFooter({
   const hills = colors.hills && colors.hills.length >= 2 ? colors.hills : base.hills
 
   const opts = React.useRef({ mist, drift, interactive, scrollParallax })
-  opts.current = { mist, drift, interactive, scrollParallax }
+  // Updated after render (effects below read it later), never during render.
+  React.useEffect(() => {
+    opts.current = { mist, drift, interactive, scrollParallax }
+  })
   const key = [seed, colors.sky.join(), colors.haze, colors.glow, colors.ground, colors.night ? 1 : 0, hills.map((h) => h.join()).join()].join("|")
 
   // "auto" follows a .dark class on the page, the way 21st and shadcn theme.
