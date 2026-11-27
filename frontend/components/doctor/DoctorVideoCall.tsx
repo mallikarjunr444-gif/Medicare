@@ -43,7 +43,8 @@ import {
 import { PhotorealisticDigitalHuman } from './PhotorealisticDigitalHuman'
 import { expressionFor } from '@/lib/doctorExpression'
 import { attachAudioAnalyser, setAudioOutputMuted } from '@/lib/audioEnergy'
-import { PatientWebcamPiP } from '../video/PatientWebcamPiP'
+import { PatientWebcamPiP, type CameraReport } from '../video/PatientWebcamPiP'
+import { CameraGate } from './CameraGate'
 import { VoiceOrb } from '@/components/ui/voice-orb'
 import { useDoctorSpeech } from './useDoctorSpeech'
 import { useConsultationSpeechRecognition } from './useConsultationSpeechRecognition'
@@ -111,7 +112,14 @@ export function DoctorVideoCall({
   const [language, setLanguage] = useState<ConsultationLanguage>('kn') // Default to regional Kannada or selected
   const [panelTab, setPanelTab] = useState<'chat' | 'notes'>('chat')
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(true)
-  const [isCameraOn, setIsCameraOn] = useState(false)
+  // The camera is compulsory: it starts by itself with the consultation and there is no off switch.
+  const [isCameraOn, setIsCameraOn] = useState(true)
+  const [cameraRetry, setCameraRetry] = useState(0)
+  const [cameraReport, setCameraReport] = useState<CameraReport | null>(null)
+  const [cameraHadBeenOk, setCameraHadBeenOk] = useState(false)
+  const cameraOk = !!cameraReport && cameraReport.camera === 'live' && (cameraReport.human.state === 'human' || !cameraReport.human.available)
+  const cameraOkRef = useRef(false)
+  useEffect(() => { cameraOkRef.current = cameraOk; if (cameraOk) setCameraHadBeenOk(true) }, [cameraOk])
   const [consultationSeconds, setConsultationSeconds] = useState(0)
   const [inputText, setInputText] = useState('')
   const [activeTriage, setActiveTriage] = useState<TriageLevel>(1)
@@ -595,7 +603,13 @@ export function DoctorVideoCall({
     return `${m}:${s}`
   }
 
+  // If the camera goes off (or something that is not a person is shown) mid-call, the microphone stops too until it is fixed.
+  useEffect(() => {
+    if (isCameraOn && !isLanguageModalOpen && !cameraOk && voiceInput.isEnabled) stopVoiceInput()
+  }, [isCameraOn, isLanguageModalOpen, cameraOk, voiceInput.isEnabled, stopVoiceInput])
+
   const toggleMicListening = () => {
+    if (!voiceInput.isEnabled && !cameraOkRef.current) { toast.error('Turn your camera on to continue.'); return }
     if (voiceInput.isEnabled) {
       stopVoiceInput()
       setDoctorState('idle')
@@ -618,6 +632,7 @@ export function DoctorVideoCall({
     async (customText?: string) => {
       const msg = (customText || inputText).trim()
       if (!msg) return
+      if (!cameraOkRef.current) { toast.error('Turn your camera on to continue.'); return }
       streamedDoctorMessageIdRef.current = null
       streamedDoctorTextRef.current = ''
 
@@ -853,6 +868,16 @@ export function DoctorVideoCall({
 
   return (
     <div className="font-consult relative w-full min-h-[100dvh] lg:h-[100dvh] flex flex-col bg-clinic-porcelain text-clinic-ink overflow-x-hidden">
+      {/* Camera is compulsory: blocks the call until it is on and shows a person. */}
+      {isCameraOn && !isLanguageModalOpen && !cameraOk && (
+        <CameraGate
+          report={cameraReport}
+          midCall={cameraHadBeenOk}
+          onRetry={() => setCameraRetry((n) => n + 1)}
+          onEnd={handleEndCall}
+        />
+      )}
+
       {/* ── 1. PRE-CONSULTATION LANGUAGE SELECTION GATE MODAL ── */}
       <LanguageSelectionModal
         isOpen={isLanguageModalOpen}
@@ -996,7 +1021,8 @@ export function DoctorVideoCall({
               <PatientWebcamPiP
                 isCameraOn={isCameraOn}
                 isMicOn={isListeningSpeech}
-                onToggleCamera={() => setIsCameraOn((prev) => !prev)}
+                retryToken={cameraRetry}
+                onStatusChange={setCameraReport}
                 onToggleMic={toggleMicListening}
                 onFrame={sendFrameToBackend}
               />
@@ -1059,16 +1085,14 @@ export function DoctorVideoCall({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsCameraOn(!isCameraOn)}
-                aria-label={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
-                aria-pressed={isCameraOn}
-                title={isCameraOn ? 'Turn camera off' : 'Turn camera on — the doctor can see you and check how you look. Pictures are not saved.'}
-                className="inline-flex h-11 items-center gap-2 rounded-xl border border-clinic-hairline bg-clinic-surface px-3 text-[13px] font-semibold text-clinic-ink transition hover:bg-clinic-porcelain focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-clinic-teal/25"
+              <div
+                role="status"
+                title="The camera must stay on during the consultation. Pictures are not saved."
+                className="inline-flex h-11 items-center gap-2 rounded-xl border border-clinic-hairline bg-clinic-surface px-3 text-[13px] font-semibold text-clinic-ink"
               >
-                {isCameraOn ? <Video size={17} className="text-clinic-teal" aria-hidden="true" /> : <VideoOff size={17} className="text-clinic-muted" aria-hidden="true" />}
-                <span className="hidden lg:inline">{isCameraOn ? 'Camera on' : 'Camera off'}</span>
-              </button>
+                {cameraOk ? <Video size={17} className="text-clinic-teal" aria-hidden="true" /> : <VideoOff size={17} className="text-clinic-brick" aria-hidden="true" />}
+                <span className="hidden lg:inline">{cameraOk ? 'Camera on' : 'Camera needed'}</span>
+              </div>
 
               <button
                 onClick={toggleMute}
