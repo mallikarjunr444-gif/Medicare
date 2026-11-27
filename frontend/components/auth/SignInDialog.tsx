@@ -1,40 +1,33 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { ShieldCheck, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/lib/auth/AuthProvider'
 import { GoogleSignInButton } from './GoogleSignInButton'
 import { EmailAuthForm } from './EmailAuthForm'
 
-/** One screen for both sign-in and sign-up: Google creates the account the first time. */
+/** One screen for both sign-in and sign-up. Account is REQUIRED – there is no "skip" option. */
 export function SignInDialog({ onClose }: Readonly<{ onClose: () => void }>) {
   const { status, busy, error, signInWithGoogle, clearError } = useAuth()
-  const closeRef = useRef<HTMLButtonElement>(null)
   const [useEmail, setUseEmail] = useState(false)
 
+  // Auto-close only when the user has successfully signed in
   useEffect(() => {
     if (status === 'signed-in') onClose()
   }, [status, onClose])
 
+  // Lock scroll while dialog is open; DO NOT add Escape or backdrop-click dismiss —
+  // creating an account is mandatory to use MediCare.
   useEffect(() => {
     clearError()
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    closeRef.current?.focus()
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-    }
-  }, [onClose, clearError])
+    return () => { document.body.style.overflow = prev }
+  }, [clearError])
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-0 backdrop-blur-md sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-0 backdrop-blur-md sm:items-center sm:p-4">
       <div role="dialog" aria-modal="true" aria-labelledby="signin-title" className="relative w-full max-w-md rounded-t-[28px] bg-white p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-[#1d1d1f] shadow-2xl sm:rounded-[28px] sm:p-8">
-        <button ref={closeRef} type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-full p-2 text-[#6e6e73] transition hover:bg-[#f5f5f7] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30">
-          <X size={18} aria-hidden="true" />
-        </button>
         <div className="text-center">
           <span className="block text-[26px] font-semibold leading-none tracking-[-0.045em]">MediCare</span>
           <h2 id="signin-title" className="mt-5 text-[22px] font-semibold tracking-tight">Sign in or create your account</h2>
@@ -67,9 +60,7 @@ export function SignInDialog({ onClose }: Readonly<{ onClose: () => void }>) {
         <p className="mt-4 text-center text-[11px] leading-relaxed text-[#6e6e73]">
           By continuing you agree to the <a href="/terms" target="_blank" rel="noreferrer" className="text-[#0071e3] hover:underline">Terms</a> and <a href="/privacy" target="_blank" rel="noreferrer" className="text-[#0071e3] hover:underline">Privacy Policy</a>.
         </p>
-        <button type="button" onClick={onClose} className="mx-auto mt-3 block text-[13px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30">
-          Not now, continue without signing in
-        </button>
+        {/* "Continue without signing in" removed – an account is required. */}
       </div>
     </div>
   )

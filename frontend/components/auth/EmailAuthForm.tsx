@@ -12,6 +12,9 @@ const input = 'mt-1.5 block w-full min-h-11 rounded-xl border border-[#d2d2d7] b
 const btn = 'inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#0071e3] px-6 text-sm font-medium text-white transition hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 disabled:cursor-not-allowed disabled:bg-[#0071e3]/40'
 const link = 'font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 rounded'
 
+const USERNAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 /** Email + password sign-in / sign-up / forgot-password / authenticator-code step. Passwords never touch storage or URLs. */
 export function EmailAuthForm() {
   const { signInWithPassword, signUpWithPassword, busy, error, clearError } = useAuth()
@@ -23,10 +26,29 @@ export function EmailAuthForm() {
   const [otp, setOtp] = useState('')
   const [sentReset, setSentReset] = useState(false)
   const [sending, setSending] = useState(false)
-  const go = (m: Mode) => { clearError(); setMode(m); setSentReset(false) }
+  const [localError, setLocalError] = useState<string | null>(null)
+  const go = (m: Mode) => { clearError(); setLocalError(null); setMode(m); setSentReset(false) }
+
+  const validate = (): string | null => {
+    if (mode !== 'signup') return null
+    const u = username.trim()
+    const e = email.trim()
+    const p = password
+    if (!EMAIL_RE.test(e)) return 'Enter a valid email address.'
+    if (u.length < 3 || u.length > 39 || !USERNAME_RE.test(u)) {
+      return u.includes('@')
+        ? 'Usernames cannot contain @. Use only letters, numbers, underscores (_) or hyphens (-).'
+        : 'Username must be 3–39 characters: letters, numbers, _ or - only (no spaces or @).'
+    }
+    if (p.length < 8 || p.length > 128) return 'Password must be 8–128 characters.'
+    return null
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const validErr = validate()
+    if (validErr) { setLocalError(validErr); return }
+    setLocalError(null)
     try {
       if (mode === 'signup') {
         await signUpWithPassword({ email: email.trim(), username: username.trim(), password, full_name: fullName.trim() || undefined })
@@ -68,7 +90,7 @@ export function EmailAuthForm() {
           <div>
             <label htmlFor="ea-user" className="text-sm font-medium text-[#1d1d1f]">Username</label>
             <input id="ea-user" className={input} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={39} required />
-            <p className="mt-1.5 text-xs text-[#6e6e73]">3-39 characters. Start and end with a letter or number; underscores and hyphens are allowed between.</p>
+            <p className="mt-1.5 text-xs text-[#6e6e73]">3–39 characters. Letters, numbers, underscores and hyphens only (no spaces or @).</p>
           </div>
         </>
       )}
@@ -92,7 +114,7 @@ export function EmailAuthForm() {
           <p className="mt-1.5 text-xs text-[#6e6e73]">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
         </div>
       )}
-      {error && <p role="alert" className="rounded-xl bg-[#fff2f0] px-3.5 py-2.5 text-[13px] leading-5 text-[#b3261e]">{error}</p>}
+      {(error || localError) && <p role="alert" className="rounded-xl bg-[#fff2f0] px-3.5 py-2.5 text-[13px] leading-5 text-[#b3261e]">{localError ?? error}</p>}
       <button type="submit" className={btn} disabled={busy || sending}>
         {(busy || sending) && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
         {mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'otp' ? 'Verify and sign in' : 'Sign in'}

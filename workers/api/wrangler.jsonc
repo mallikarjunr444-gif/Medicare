@@ -19,8 +19,8 @@
     "AUTH_COOKIE_NAME": "access_token",
     "AUTH_COOKIE_SECURE": "false",
     "AUTH_COOKIE_SAMESITE": "lax",
-    "JWT_EXPIRATION_HOURS": "24",
-    "GUEST_ACCOUNTS_ENABLED": "true"
+    "JWT_EXPIRATION_HOURS": "8760",
+    "GUEST_ACCOUNTS_ENABLED": "false"
   },
 
   // Cloudflare's built-in rate limiter: 60 requests / 60 s per key.
@@ -42,8 +42,8 @@
         // Frontend (web.app) and API (workers.dev) are different sites, so the
         // cookie must be SameSite=None; Secure. Bearer tokens also work.
         "AUTH_COOKIE_SAMESITE": "none",
-        "JWT_EXPIRATION_HOURS": "24",
-        "GUEST_ACCOUNTS_ENABLED": "true"
+        "JWT_EXPIRATION_HOURS": "8760",
+        "GUEST_ACCOUNTS_ENABLED": "false"
       },
       "ratelimits": [
         { "name": "RATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }

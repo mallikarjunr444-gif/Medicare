@@ -32,7 +32,6 @@ import { PatientNotesPanel } from '@/components/patient/PatientNotesPanel'
 import { AppointmentWorkspace } from '@/components/patient/AppointmentWorkspace'
 import { SpecialistBookingModal, type AppointmentRequestResult } from '@/components/doctor/SpecialistBookingModal'
 import type { DoctorId } from '@/lib/doctorTypes'
-import { useStore } from '@/store/useStore'
 
 const DoctorVideoCall = dynamic(
   () => import('@/components/doctor/DoctorVideoCall').then((m) => m.DoctorVideoCall),
@@ -85,10 +84,15 @@ const mobileMoreItems: typeof navItems = [
 ]
 
 export default function Home() {
-  const { isAuthenticated, setAuth, user } = useStore()
-  const { profile } = useAuth()
+  const { profile, status } = useAuth()
   const [signInOpen, setSignInOpen] = useState(false)
+  // Show sign-in dialog automatically whenever the user is not signed in.
+  // The dialog itself does NOT allow dismissal without signing in.
   const closeSignIn = useCallback(() => setSignInOpen(false), [])
+  useEffect(() => {
+    if (status === 'signed-out' || status === 'error') setSignInOpen(true)
+    if (status === 'signed-in') setSignInOpen(false)
+  }, [status])
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorId>('dr_arjun')
   const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null)
@@ -99,17 +103,7 @@ export default function Home() {
   const [appointmentDialogOpen, setAppointmentDialogOpen] = useState(false)
   const [latestAppointmentRequest, setLatestAppointmentRequest] = useState<AppointmentRequestResult | null>(null)
 
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      setAuth('patient-direct-token', {
-        id: 'patient-direct',
-        email: 'patient@medicare.app',
-        username: 'Patient User',
-        full_name: 'Patient User',
-        is_guest: true,
-      })
-    }
-  }, [isAuthenticated, setAuth])
+  // Guest fallback removed – a real account is required to use MediCare.
 
   const navigate = (next: View) => {
     setView(next)
@@ -167,7 +161,7 @@ export default function Home() {
         {view === 'patient' && (
           <AuthGuard what="your care dashboard">
             <PatientDashboard
-              displayName={profile?.full_name || user?.full_name || user?.username || 'Patient'}
+              displayName={profile?.full_name || 'Patient'}
               isGuest={!profile}
               email={profile?.email}
               photoUrl={profile?.photo_url}

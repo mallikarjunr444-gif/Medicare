@@ -52,8 +52,8 @@ const codeOf = (e: unknown): string => (typeof e === 'object' && e && 'code' in 
 
 const SIGNUP_FIELD_MESSAGES: Record<string, string> = {
   email: 'Enter a valid email address.',
-  username: 'Username must be 3-39 characters, start and end with a letter or number, and may use _ or - between characters.',
-  password: 'Password must be 8-128 characters.',
+  username: 'Username must be 3–39 characters using only letters, numbers, underscores (_) or hyphens (-). The @ symbol is not allowed in usernames.',
+  password: 'Password must be 8–128 characters.',
   full_name: 'Full name must be 200 characters or fewer.',
 }
 
@@ -64,7 +64,7 @@ function signupValidationMessage(detail: unknown): string {
     const loc = (item as { loc?: unknown }).loc
     return Array.isArray(loc) && loc[0] === 'body' && typeof loc[1] === 'string' ? [loc[1]] : []
   })
-  const messages = [...new Set(fields)].map((field) => SIGNUP_FIELD_MESSAGES[field]).filter(Boolean)
+  const messages = Array.from(new Set(fields)).map((field) => SIGNUP_FIELD_MESSAGES[field]).filter(Boolean)
   return messages.length ? messages.join(' ') : 'Please check your email, username, and password.'
 }
 
