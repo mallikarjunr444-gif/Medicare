@@ -4,6 +4,7 @@ import {
 } from "../auth";
 import type { AppVars, DbUser, Env } from "../env";
 import { fail, iso } from "../http";
+import { LOGIN_RETRY_AFTER_S, loginBlocked, loginFailed, loginSucceeded } from "../security";
 import { checkEmail, checkOptionalName, checkPassword, checkUsername, finish, intParam, readJson } from "../validate";
 
 export const users = new Hono<{ Bindings: Env; Variables: AppVars }>();
@@ -49,6 +50,12 @@ users.post("/login", async (c) => {
     return c.json({ detail: [{ loc: ["body", "username"], msg: "Field required", type: "missing" }] }, 422);
   }
   const email = username.trim().toLowerCase();
+  // Brute-force throttle keyed on client IP + account, checked before any bcrypt work.
+  const ip = (c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0] ?? "unknown").trim();
+  const throttleKey = `${ip}|${email}`;
+  if (loginBlocked(throttleKey)) {
+    return c.json({ detail: "Too many failed sign-in attempts. Try again later." }, 429, { "Retry-After": String(LOGIN_RETRY_AFTER_S) });
+  }
   // Verified in Postgres. Python writes `$2b$` hashes; pgcrypto wants `$2a$`
   // (identical for passwords under 255 bytes), so normalise the prefix. Non-bcrypt
   // hashes (e.g. the guest "*") never match.
@@ -63,10 +70,12 @@ users.post("/login", async (c) => {
   )[0] as (DbUser & { pw_ok: boolean }) | undefined;
 
   if (!password || !user || !user.hashed_password || !user.pw_ok) {
+    loginFailed(throttleKey);
     fail(401, "Incorrect email or password", { "WWW-Authenticate": "Bearer" });
   }
   if (!user!.is_active) fail(403, "Inactive user");
 
+  loginSucceeded(throttleKey);
   const token = await createAccessToken(c.env, user!.id);
   setAuthCookie(c, token);
   return c.json({ access_token: token, token_type: "bearer" });

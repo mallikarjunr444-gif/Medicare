@@ -28,7 +28,7 @@ function readToken(): string | null {
     // longer a synthetic 'guest' sentinel to filter out. The old sentinel is
     // still discarded so a browser holding stale persisted state re-registers
     // as a guest instead of sending an unusable token forever.
-    if (!token || token === 'guest') return null
+    if (!token || token === 'guest' || /direct-token|patient-direct/.test(token)) return null
     return token
   } catch {
     return null

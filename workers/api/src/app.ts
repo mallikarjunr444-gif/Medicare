@@ -11,6 +11,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
 import { loadUser } from "./auth";
+import { originGuard } from "./security";
 import type { AppVars, Env, Query } from "./env";
 import { messages } from "./routes/messages";
 import { sessions } from "./routes/sessions";
@@ -44,7 +45,16 @@ function fallbackAllow(key: string): boolean {
 export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {}) {
   const app = new Hono<{ Bindings: Env; Variables: AppVars }>();
 
-  app.use("*", secureHeaders());
+  app.use(
+    "*",
+    secureHeaders({
+      strictTransportSecurity: "max-age=63072000; includeSubDomains",
+      // JSON API: nothing it returns should ever be rendered, framed or scripted.
+      contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] },
+      referrerPolicy: "no-referrer",
+      crossOriginResourcePolicy: "same-site",
+    }),
+  );
   app.use("*", async (c, next) => {
     const id = c.req.header("cf-ray") ?? crypto.randomUUID();
     await next();
@@ -60,6 +70,9 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
       maxAge: 600,
     })(c, next),
   );
+
+  // CSRF: refuse state-changing requests whose Origin is not an allowed frontend.
+  app.use("/api/*", originGuard);
 
   // Per-identity limiter (Cloudflare's rate-limit binding). Skipped if unbound.
   app.use("/api/*", async (c, next) => {

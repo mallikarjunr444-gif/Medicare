@@ -1,0 +1,15 @@
+# Narrow allowlist: only files whose Gitleaks hits were individually reviewed and
+# confirmed as placeholders / test fixtures / generated data (see docs/security/SECURITY_AUDIT.md).
+title = "MediCare gitleaks config"
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Reviewed false positives (placeholders, test fixture password, generated render JSON, RAG index)"
+paths = [
+  '''(^|/)\.env(\.prod)?\.example$''',
+  '''(^|/)backend/tests/test_e2e_flow\.py$''',
+  '''^ai-avatar-system/backend/tests/test_e2e_flow\.py$''',
+  '''^\.buddy/objects/''',
+  '''^database/rag_store/medical_index\.json$''',
+]
