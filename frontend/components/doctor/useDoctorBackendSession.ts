@@ -136,6 +136,14 @@ export function useDoctorBackendSession(onMessage: (message: WsMessage) => void)
     return true
   }, [])
 
+  /** Numbers-only camera measurements for the doctor (see lib/vision). Sent a few times a minute; the server never stores them. */
+  const sendObservations = useCallback((summary: unknown) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify({ type: 'observations', summary }))
+    return true
+  }, [])
+
   const interrupt = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'interrupt' }))
@@ -155,5 +163,5 @@ export function useDoctorBackendSession(onMessage: (message: WsMessage) => void)
 
   const getSessionId = useCallback(() => sessionIdRef.current, [])
 
-  return { status, getSessionId, connect, setLanguage, sendText, sendFrame, interrupt, disconnect }
+  return { status, getSessionId, connect, setLanguage, sendText, sendFrame, sendObservations, interrupt, disconnect }
 }

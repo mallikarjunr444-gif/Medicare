@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { useHumanCheck, type HumanCheck } from '@/lib/vision/useHumanCheck'
+import { useConsultationObservations } from '@/lib/vision/useConsultationObservations'
+import type { VisionSummary } from '@/lib/vision/metrics'
 import {
   CameraOff,
   Mic,
@@ -25,6 +27,8 @@ interface PatientWebcamPiPProps {
   retryToken?: number
   /** Camera state and the person-or-not check, reported whenever either changes. */
   onStatusChange?: (r: CameraReport) => void
+  /** Numbers-only facial-behaviour summary every 30 s while a person is on camera. Never a picture, never a diagnosis. */
+  onObservations?: (summary: VisionSummary) => void
   /** Called with a small JPEG data URL when the picture changes noticeably (the doctor watches for changes). */
   onFrame?: (jpegDataUrl: string) => void
   className?: string
@@ -36,6 +40,7 @@ export function PatientWebcamPiP({
   onToggleMic,
   retryToken = 0,
   onStatusChange,
+  onObservations,
   onFrame,
   className = '',
 }: PatientWebcamPiPProps) {
@@ -129,6 +134,7 @@ export function PatientWebcamPiP({
 
   // Is it a person? Runs only while the camera is live.
   const human = useHumanCheck(videoRef, isCameraOn && cameraStatus === 'live')
+  useConsultationObservations(videoRef, isCameraOn && cameraStatus === 'live' && human.state === 'human' && !!onObservations, (x) => onObservations?.(x))
   const onStatusRef = useRef(onStatusChange)
   useEffect(() => { onStatusRef.current = onStatusChange }, [onStatusChange])
   useEffect(() => { onStatusRef.current?.({ camera: cameraStatus, human }) }, [cameraStatus, human])
