@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, buildSessionWsUrl } from '@/lib/api'
+import { api, getSessionWsUrl } from '@/lib/api'
 import type { WsMessage } from '@/lib/types'
 import { useStore } from '@/store/useStore'
 
@@ -22,9 +22,11 @@ export function useDoctorBackendSession(onMessage: (message: WsMessage) => void)
     handlerRef.current = onMessage
   }, [onMessage])
 
-  const openSocket = useCallback((sessionId: string) => {
+  const openSocket = useCallback(async (sessionId: string) => {
     if (intentionalCloseRef.current) return
-    const socket = new WebSocket(buildSessionWsUrl(sessionId))
+    const wsUrl = await getSessionWsUrl(sessionId)
+    if (intentionalCloseRef.current) return
+    const socket = new WebSocket(wsUrl)
     socketRef.current = socket
     socket.onopen = () => {
       reconnectAttemptsRef.current = 0

@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ShieldCheck, X } from 'lucide-react'
 import { useAuth } from '@/lib/auth/AuthProvider'
 import { GoogleSignInButton } from './GoogleSignInButton'
+import { EmailAuthForm } from './EmailAuthForm'
 
 /** One screen for both sign-in and sign-up: Google creates the account the first time. */
 export function SignInDialog({ onClose }: Readonly<{ onClose: () => void }>) {
   const { status, busy, error, signInWithGoogle, clearError } = useAuth()
   const closeRef = useRef<HTMLButtonElement>(null)
+  const [useEmail, setUseEmail] = useState(false)
 
   useEffect(() => {
     if (status === 'signed-in') onClose()
@@ -43,10 +45,18 @@ export function SignInDialog({ onClose }: Readonly<{ onClose: () => void }>) {
 
         <div className="mt-6">
           <GoogleSignInButton onClick={signInWithGoogle} loading={busy || status === 'loading'} />
-          {error && (
+          {error && !useEmail && (
             <p role="alert" className="mt-3 rounded-xl bg-[#fff2f0] px-3.5 py-2.5 text-[13px] leading-5 text-[#b3261e]">
               {error}
             </p>
+          )}
+          <div className="my-4 flex items-center gap-3 text-xs text-[#86868b]" aria-hidden="true"><span className="h-px flex-1 bg-[#e8e8ed]" />or<span className="h-px flex-1 bg-[#e8e8ed]" /></div>
+          {useEmail ? (
+            <EmailAuthForm />
+          ) : (
+            <button type="button" onClick={() => setUseEmail(true)} className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-[#d2d2d7] px-6 text-sm font-medium text-[#1d1d1f] transition hover:bg-[#f5f5f7] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30">
+              Continue with email
+            </button>
           )}
         </div>
 

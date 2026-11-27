@@ -7,6 +7,7 @@ import type { Metadata, Viewport } from 'next'
 import { Toaster } from 'react-hot-toast'
 import { QueryProvider } from '@/components/providers/QueryProvider'
 import { AuthProvider } from '@/lib/auth/AuthProvider'
+import { AccountLinkHandler } from '@/components/auth/AccountLinkHandler'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 // Font variables with standard fallbacks ensuring offline compilation and robust loading
@@ -114,6 +115,7 @@ export default function RootLayout({
         </a>
         <QueryProvider>
           <AuthProvider>
+            <AccountLinkHandler />
             <ErrorBoundary>
               <div id="app-content">{children}</div>
             </ErrorBoundary>

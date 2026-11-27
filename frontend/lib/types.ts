@@ -100,6 +100,8 @@ export interface UserProfile {
   created_at: string | null
   updated_at: string | null
   last_login_at: string | null
+  email_verified?: boolean
+  mfa_enabled?: boolean
 }
 
 export type ProfileUpdate = Partial<Pick<UserProfile, 'full_name' | 'phone' | 'date_of_birth' | 'gender'>>

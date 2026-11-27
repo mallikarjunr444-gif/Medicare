@@ -34,6 +34,7 @@ beforeAll(async () => {
   db = new PGlite({ extensions: { pgcrypto } });
   await db.exec("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
   await db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../migrations/003_account_protection.sql", import.meta.url), "utf8"));
   app = createApp(() => async (text, params = []) => (await db.query(text, params as any[])).rows as any[]);
 });
 
@@ -69,7 +70,7 @@ describe("users/auth", () => {
     const r = await call("/api/v1/users/register", json(null, { email: "Ann@Example.com", username: "ann_1", password: "Correct-Horse-9", full_name: "Ann" }));
     expect(r.status).toBe(201);
     const b = await r.json();
-    expect(Object.keys(b).sort()).toEqual(["created_at", "email", "full_name", "id", "is_active", "is_guest", "username"]);
+    expect(Object.keys(b).sort()).toEqual(["created_at", "email", "email_verified", "full_name", "id", "is_active", "is_guest", "mfa_enabled", "username"]);
     expect(b.email).toBe("ann@example.com");
     expect(JSON.stringify(b)).not.toContain("hash");
   });

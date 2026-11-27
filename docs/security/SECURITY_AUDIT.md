@@ -19,13 +19,22 @@ Method: manual code review plus Gitleaks 8.28.0, Semgrep CE (rules from the open
 ## Semgrep findings not in the live path
 `backend/app/services/animator.py` (asyncio exec, md5), `medical_web_research.py` / `rag_service.py` (non-defused XML), `gnani_service.py` (dynamic urllib). Not fixed here because that service is not deployed by the current pipeline. Two `html-in-template-string` groups in the frontend are false positives (values are HTML-escaped or constants).
 
-## Open weaknesses (not fixed in this change)
-- No MFA, email verification, or password reset for email/password accounts (needs an email provider and schema work).
-- Stateless 24 h JWT with no server-side revocation; logout only clears the cookie.
-- `PUT /users/me` changes password without the current password.
-- No row-level security: the API connects as the database owner; ownership is enforced only in application code.
-- No private report storage, data export/delete endpoints, or audit log outside psychology.
-- WebSocket still accepts `?token=` in the URL (token in URL).
-- Auth state (including the real JWT) is persisted to localStorage by the Zustand store; the UI also seeds a placeholder "Patient" identity.
-- Login timing differs for unknown email vs wrong password (user enumeration by timing).
-- Registration and guest creation have no stricter rate limit than the global one.
+## Status update: account-protection branch (`security/account-protection`)
+| Weakness | Status |
+|---|---|
+| Login throttle not durable | **Fixed**: counters in Postgres (hashed keys), per IP+account and per account; in-memory layer kept as fallback. Tested across a fresh app instance. |
+| No session revocation | **Fixed**: per-token `jti` revocation on logout, `token_version` epoch for password change/reset/MFA change/"sign out everywhere". Tested. |
+| `PUT /users/me` changed password without current password | **Fixed**: current password required; other sessions revoked. Tested. |
+| No email verification / password reset | **Implemented** (hashed, single-use, expiring tokens; no account enumeration). **Email delivery needs a provider configured** (`EMAIL_API_KEY`, `EMAIL_FROM`); delivery itself is untested here (mocked). |
+| No MFA | **Implemented** TOTP (RFC 6238 vector tested) + 10 single-use recovery codes, encrypted secret, replay protection. Email/password accounts only; Google accounts rely on Google's own 2-step verification. |
+| No audit log | **Implemented** for auth events (`audit_log`, no secrets). Per-user view at `GET /users/me/audit`. Not yet recorded for every medical-data read. |
+| No export / deletion | **Implemented** `GET /users/me/export`, `DELETE /users/me` (confirmation + password/MFA). Deleting a Google user does not delete the Firebase identity (needs Admin SDK). |
+| Token in WebSocket URL | **Mitigated**: one-time 60 s ticket used by the site; legacy `?token=` remains as a fallback until the API and site are both deployed, then should be removed. |
+| Login timing differs for unknown email | Open (minor). |
+| Registration/guest creation limits | Open. |
+
+## Still open
+- **No row-level security.** The API still connects as the database owner; ownership is enforced in code (and covered by tests), not by Postgres policies. Doing this properly needs a non-owner role and per-request `set_config` inside a transaction, which the Neon HTTP driver only supports through batch transactions. Not started.
+- **No private medical-report file storage** (no upload endpoint exists yet). Needs R2 (not enabled on the account) or a Neon storage bucket.
+- Auth token is still persisted to localStorage by the frontend store; moving to HttpOnly cookies only needs same-origin `/api` routing first.
+- Email verification is not enforced for sign-in (existing users would be locked out); it is recorded and surfaced in the UI.

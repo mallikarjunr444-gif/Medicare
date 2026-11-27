@@ -16,6 +16,7 @@ import type { AppVars, Env, Query } from "./env";
 import { messages } from "./routes/messages";
 import { sessions } from "./routes/sessions";
 import { users } from "./routes/users";
+import { account } from "./routes/account";
 import { authRoutes, healthRecords, profile, reportsRoutes } from "./routes/profile";
 import { psychology } from "./routes/psychology";
 import { psychClinical, psychObserver } from "./routes/psychClinical";
@@ -115,6 +116,7 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
   app.route("/api/v1/conversations", conversations);
   app.route("/api/v1/consultation-reports", consultationReports);
   app.route("/api/v1/doctor", doctorActions);
+  app.route("/api/v1/users", account);
   app.route("/api/v1/users", users);
   app.route("/api/v1/auth", authRoutes);
   app.route("/api/v1/profile", profile);
