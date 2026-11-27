@@ -1,4 +1,5 @@
 import { userIdFromToken } from "./auth";
+import { wsOriginAllowed } from "./security";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
 import { synthesizeSpeech } from "./tts";
@@ -312,8 +313,14 @@ export function normaliseHistory(messages: Chat[]): Chat[] {
 
 export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Query, sessionId: string) {
   if (req.headers.get("Upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
+  if (!wsOriginAllowed(req.headers.get("Origin"), env)) return new Response("Forbidden origin", { status: 403 });
   const url = new URL(req.url);
-  const cookie = req.headers.get("Cookie")?.match(new RegExp(`(?:^|;\\s*)${env.AUTH_COOKIE_NAME}=([^;]+)`))?.[1];
+  const cookie = req.headers
+    .get("Cookie")
+    ?.split(";")
+    .map((p) => p.trim())
+    .find((p) => p.startsWith(`${env.AUTH_COOKIE_NAME}=`))
+    ?.slice(env.AUTH_COOKIE_NAME.length + 1);
   const token = url.searchParams.get("token") || cookie || "";
 
   const pair = new WebSocketPair();

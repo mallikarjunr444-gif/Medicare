@@ -1,0 +1,48 @@
+name: Deploy Website (Firebase Hosting)
+
+# MANUAL ONLY. Run from the Actions tab after the secret below is set.
+# Requires repository secret FIREBASE_SERVICE_ACCOUNT (JSON key of a service account with
+# the "Firebase Hosting Admin" role on project medicus-labs). No secret is stored in the repo.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-firebase
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_PUBLIC_API_URL: https://medicare-api-prod.mallikarjunr444.workers.dev
+      NEXT_PUBLIC_WS_URL: wss://medicare-api-prod.mallikarjunr444.workers.dev
+      NEXT_PUBLIC_SITE_URL: https://medicus-labs.web.app
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy to Firebase Hosting
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          test -n "$GOOGLE_APPLICATION_CREDENTIALS_JSON" || { echo "FIREBASE_SERVICE_ACCOUNT secret is not set"; exit 1; }
+          umask 077
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/sa.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.37.0 deploy --only hosting --project medicus-labs --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
