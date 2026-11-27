@@ -415,9 +415,8 @@ export class PortraitWarp {
   }
 
   /**
-   * Fill the gap between the displaced inner-lip landmarks with an anatomical mouth interior: dark cavity, tongue
-   * (median groove, soft texture), upper and lower teeth shaped like real incisors, canines and premolars with
-   * gum lines, translucent edges, highlights and the dark side corridors seen in real photos.
+   * Fill the gap between the displaced inner-lip landmarks with a mouth interior: dark cavity, tongue
+   * (median groove, soft texture) and shadowed corners. No teeth are drawn.
    */
   private drawMouthInterior(ctx: CanvasRenderingContext2D, pose: PortraitPose, openPx: number) {
     const pts = this.face.points
@@ -473,10 +472,6 @@ export class PortraitWarp {
     ctx.filter = `blur(${Math.max(0.25, h * 0.03).toFixed(2)}px)`
 
     const half = w / 2
-    // Where the tooth line sits at horizontal position x: it follows the lens (corners curve toward the middle of the opening).
-    const upperAt = (x: number) => { const u = Math.min(1, Math.abs(x - cx) / half); return top + h * 0.34 * u * u }
-    const lowerAt = (x: number) => { const u = Math.min(1, Math.abs(x - cx) / half); return bottom - h * 0.34 * u * u }
-
     // Tongue: sits low in the mouth, rises with opening. Rounded body, median groove, soft papillae texture.
     if (open > 0.12) {
       const tcx = cx, tcy = bottom - h * 0.02
@@ -501,79 +496,6 @@ export class PortraitWarp {
         const dx = tcx + Math.cos(a) * rx * r, dy = tcy + Math.sin(a) * ry * r
         ctx.beginPath(); ctx.arc(dx, dy, Math.max(0.35, w * 0.0035), 0, Math.PI * 2); ctx.fill()
       }
-    }
-
-    // One tooth. `dir` is +1 for upper teeth (root at the top, biting edge down) and -1 for lower teeth.
-    const tooth = (x0: number, x1: number, rootY: number, edgeY: number, dir: 1 | -1, shade: number) => {
-      const r = Math.min((x1 - x0) * 0.32, Math.abs(edgeY - rootY) * 0.45)
-      const p = new Path2D()
-      p.moveTo(x0, rootY)
-      p.lineTo(x1, rootY)
-      p.lineTo(x1, edgeY - dir * r)
-      p.quadraticCurveTo(x1, edgeY, x1 - r * dir, edgeY)
-      p.lineTo(x0 + r * dir, edgeY)
-      p.quadraticCurveTo(x0, edgeY, x0, edgeY - dir * r)
-      p.closePath()
-      const g = ctx.createLinearGradient(0, rootY, 0, edgeY)
-      g.addColorStop(0, `rgba(${196 - shade},${178 - shade},${150 - shade},1)`) // warm, darker near the gum
-      g.addColorStop(0.35, `rgba(${246 - shade},${240 - shade},${228 - shade},1)`)
-      g.addColorStop(0.85, `rgba(${240 - shade},${234 - shade},${222 - shade},1)`)
-      g.addColorStop(1, `rgba(${214 - shade},${214 - shade},${210 - shade},0.92)`) // thin translucent biting edge
-      ctx.fillStyle = g
-      ctx.fill(p)
-      // rounded body: darker toward each side so every tooth reads as a convex form
-      const sg = ctx.createLinearGradient(x0, 0, x1, 0)
-      sg.addColorStop(0, 'rgba(88,58,48,0.22)')
-      sg.addColorStop(0.28, 'rgba(88,58,48,0)')
-      sg.addColorStop(0.72, 'rgba(88,58,48,0)')
-      sg.addColorStop(1, 'rgba(88,58,48,0.22)')
-      ctx.fillStyle = sg
-      ctx.fill(p)
-      // soft highlight streak
-      const hw = (x1 - x0) * 0.18
-      ctx.fillStyle = 'rgba(255,255,255,0.32)'
-      ctx.beginPath(); ctx.ellipse(x0 + (x1 - x0) * 0.36, rootY + (edgeY - rootY) * 0.42, hw, Math.abs(edgeY - rootY) * 0.22, 0, 0, Math.PI * 2); ctx.fill()
-      // dark seam between neighbouring teeth
-      ctx.strokeStyle = 'rgba(80,38,34,0.24)'
-      ctx.lineWidth = Math.max(0.3, w * 0.003)
-      ctx.stroke(p)
-    }
-
-    // A row of teeth across the front of the arch: central incisors widest, then lateral, canine, premolars.
-    const row = (dir: 1 | -1, spanFactor: number, widths: number[], lengths: number[], maxLen: number, shade: number) => {
-      const sum = widths.reduce((s, v) => s + v, 0) * 2
-      const span = w * spanFactor
-      const unit = span / sum
-      const lineAt = dir === 1 ? upperAt : lowerAt
-      for (const side of [-1, 1]) {
-        let x = cx
-        for (let i = 0; i < widths.length; i++) {
-          const tw = widths[i] * unit
-          const xa = side === 1 ? x : x - tw
-          const xb = side === 1 ? x + tw : x
-          const mx = (xa + xb) / 2
-          const root = lineAt(mx)
-          const edge = root + dir * maxLen * lengths[i]
-          tooth(xa - 0.1, xb + 0.1, root, edge, dir, shade + i * 5)
-          x += side * tw
-        }
-      }
-    }
-
-    // Gum above the upper teeth and below the lower teeth, then the teeth on top of it.
-    const gumG = (y0: number, y1: number) => { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, '#9c4a50'); g.addColorStop(1, '#d28a8c'); return g }
-    const widths = [1.0, 0.8, 0.82, 0.62, 0.52]
-    if (open > 0.08) {
-      const upLen = Math.min(h * 0.55, Math.max(1.2, openPx * 0.95))
-      ctx.fillStyle = gumG(top - 1, top + upLen * 0.45)
-      ctx.fillRect(left, top - 1, w, upLen * 0.38 + 1)
-      row(1, 0.8, widths, [1, 0.88, 0.97, 0.72, 0.66], upLen, 0)
-    }
-    if (open > 0.5) {
-      const loLen = Math.min(h * 0.34, (open - 0.45) * h * 0.7)
-      ctx.fillStyle = gumG(bottom + 1, bottom - loLen * 0.45)
-      ctx.fillRect(left, bottom - loLen * 0.34, w, loLen * 0.4 + 1)
-      row(-1, 0.7, widths, [1, 0.95, 1, 0.8, 0.72], loLen, 6)
     }
 
     // Dark corridors at both corners: teeth recede into shadow, as in real photographs.
