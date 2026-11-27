@@ -14,7 +14,8 @@ UID **only** from that verified token, then reads/writes Neon rows owned by that
 2. **Authentication → Settings → Authorized domains.** Add every address the site is served from (no `https://`):
    - `localhost` (already there by default)
    - `medicare-web.mallikarjunr444.workers.dev`
-   - `medicus-labs.web.app` and `medicus-labs.firebaseapp.com`
+   - `medicare-care.web.app` (the production website)
+   - `medicus-labs.web.app` and `medicus-labs.firebaseapp.com` (Firebase auth domain)
    - any custom domain, e.g. `care.medicuslabs.app`
 3. **Project settings → Your apps → Web app** (create one if needed). Copy `apiKey`, `authDomain`, `projectId`, `appId`.
 4. **GitHub → Settings → Secrets and variables → Actions → *Variables*.** Add `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`,

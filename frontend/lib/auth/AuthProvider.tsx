@@ -50,6 +50,24 @@ const USE_REDIRECT = new Set(['auth/popup-blocked', 'auth/operation-not-supporte
 
 const codeOf = (e: unknown): string => (typeof e === 'object' && e && 'code' in e ? String((e as { code: unknown }).code) : '')
 
+const SIGNUP_FIELD_MESSAGES: Record<string, string> = {
+  email: 'Enter a valid email address.',
+  username: 'Username must be 3-39 characters, start and end with a letter or number, and may use _ or - between characters.',
+  password: 'Password must be 8-128 characters.',
+  full_name: 'Full name must be 200 characters or fewer.',
+}
+
+function signupValidationMessage(detail: unknown): string {
+  if (!Array.isArray(detail)) return 'Please check your email, username, and password.'
+  const fields = detail.flatMap((item) => {
+    if (!item || typeof item !== 'object' || !('loc' in item)) return []
+    const loc = (item as { loc?: unknown }).loc
+    return Array.isArray(loc) && loc[0] === 'body' && typeof loc[1] === 'string' ? [loc[1]] : []
+  })
+  const messages = [...new Set(fields)].map((field) => SIGNUP_FIELD_MESSAGES[field]).filter(Boolean)
+  return messages.length ? messages.join(' ') : 'Please check your email, username, and password.'
+}
+
 function describe(e: unknown): string {
   const code = codeOf(e)
   if (FRIENDLY[code]) return FRIENDLY[code]
@@ -233,7 +251,9 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     } catch (e) {
       const r = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response
       const d = r?.data?.detail
-      setError(r?.status === 409 && typeof d === 'string' ? d : r?.status === 422 ? 'Please check the details: a valid email, a username of 3-39 letters/numbers, and a password of 8-128 characters.' : 'We could not create your account. Please try again.')
+      if (r?.status === 409 && typeof d === 'string') setError(d)
+      else if (r?.status === 422) setError(signupValidationMessage(d))
+      else setError('We could not create your account. Please try again.')
       setBusy(false)
       throw e
     }

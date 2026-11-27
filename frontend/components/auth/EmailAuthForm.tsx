@@ -68,6 +68,7 @@ export function EmailAuthForm() {
           <div>
             <label htmlFor="ea-user" className="text-sm font-medium text-[#1d1d1f]">Username</label>
             <input id="ea-user" className={input} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={39} required />
+            <p className="mt-1.5 text-xs text-[#6e6e73]">3-39 characters. Start and end with a letter or number; underscores and hyphens are allowed between.</p>
           </div>
         </>
       )}
@@ -81,7 +82,7 @@ export function EmailAuthForm() {
         <div>
           <label htmlFor="ea-pass" className="text-sm font-medium text-[#1d1d1f]">Password</label>
           <input id="ea-pass" type="password" className={input} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} maxLength={128} required />
-          {mode === 'signup' && <p className="mt-1.5 text-xs text-[#6e6e73]">At least 8 characters.</p>}
+          {mode === 'signup' && <p className="mt-1.5 text-xs text-[#6e6e73]">8-128 characters.</p>}
         </div>
       )}
       {mode === 'otp' && (
