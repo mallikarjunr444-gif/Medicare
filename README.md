@@ -106,6 +106,18 @@ All formal documentation deliverables are maintained in [`documentation/`](docum
 
 ---
 
+## 🔐 Accounts & Google Sign-In
+
+The web app uses **Firebase Authentication** for Google sign-in. It opens a Google popup and falls back to a redirect when popups are unavailable. The frontend sends the Firebase ID token to the API, which verifies it before creating or loading the user's account.
+
+To enable Google sign-in locally or in a deployment:
+
+1. In Firebase Console, enable **Google** under **Authentication → Sign-in method** and add the site's hostname under **Authentication → Settings → Authorized domains**.
+2. Copy `frontend/.env.local.example` to `frontend/.env.local` and set `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, and `NEXT_PUBLIC_FIREBASE_APP_ID` from the Firebase web app configuration.
+3. Ensure the API's `FIREBASE_PROJECT_ID` matches `NEXT_PUBLIC_FIREBASE_PROJECT_ID`.
+
+Firebase is currently used for **authentication**. Profiles, consultations, health records, reports, and other application data continue to use the MediCare API and its configured database; Firestore and Firebase Storage are not currently the data stores. The Firebase web config contains public identifiers only; never put a service-account key in the frontend. See [`docs/FIREBASE_AUTH_SETUP.md`](docs/FIREBASE_AUTH_SETUP.md) for deployment domains, backend setup, and database migration details.
+
 ## 🚀 Quick Start (Local Apple Silicon Mac)
 
 ### 1. Backend Setup
