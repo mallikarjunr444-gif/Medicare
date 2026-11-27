@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@sentry/cloudflare": "^11.11.0",
-    "hono": "^4.13.17"
+    "hono": "^4.13.21"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
