@@ -193,7 +193,7 @@ describe("external provider status handling", () => {
   });
 });
 
-import { splitForSpeech, pcmBase64ToWavBase64, ttsProvider, synthesizeSpeech } from "../src/tts";
+import { splitForSpeech, pcmBase64ToWavBase64, ttsProvider, synthesizeSpeech, ttsChain } from "../src/tts";
 
 describe("server voice (kn / hi / en)", () => {
   const orig = globalThis.fetch;
@@ -361,5 +361,47 @@ describe("normaliseHistory", () => {
   it("leaves a clean alternating history untouched", () => {
     const h = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }] as const;
     expect(normaliseHistory([...h] as any)).toEqual(h);
+  });
+});
+
+describe("server voice backups", () => {
+  const orig = globalThis.fetch;
+  const mp3b64 = btoa(String.fromCharCode(...new Uint8Array(400).fill(5)));
+  it("orders engines: Gemini, then Workers AI (English only), then keyless Google", () => {
+    const ai = { run: async () => ({}) } as any;
+    expect(ttsChain({ GEMINI_API_KEY: "k", AI: ai }, "en")).toEqual(["gemini", "workers_ai", "google_translate"]);
+    expect(ttsChain({ GEMINI_API_KEY: "k", AI: ai }, "kn")).toEqual(["gemini", "google_translate"]);
+    expect(ttsChain({ AI: ai }, "en")).toEqual(["workers_ai", "google_translate"]);
+    expect(ttsChain({}, "hi")).toEqual(["google_translate"]);
+    expect(ttsChain({ TTS_PROVIDER: "off", AI: ai }, "en")).toEqual([]);
+    expect(ttsChain({ TTS_PROVIDER: "google_translate", GEMINI_API_KEY: "k" }, "en")).toEqual(["google_translate", "gemini"]);
+  });
+  it("falls through to Workers AI when Gemini fails, and to Google when both fail", async () => {
+    const calls: string[] = [];
+    try {
+      globalThis.fetch = (async (u: any) => {
+        calls.push(String(u).includes("generativelanguage") ? "gemini" : "google");
+        return String(u).includes("generativelanguage") ? new Response("no", { status: 500 }) : new Response(new Uint8Array(400).fill(7));
+      }) as any;
+      const okAi: any = { run: async () => ({ audio: mp3b64 }) };
+      let parts = await synthesizeSpeech({ GEMINI_API_KEY: "k", AI: okAi } as any, "Hello there", "en", "dr_ananya");
+      expect(parts[0].mime).toBe("audio/mpeg");
+      expect(calls).toEqual(["gemini"]); // Workers AI answered, Google never needed
+      calls.length = 0;
+      const badAi: any = { run: async () => { throw new Error("boom"); } };
+      parts = await synthesizeSpeech({ GEMINI_API_KEY: "k", AI: badAi } as any, "Hello there", "en", "dr_ananya");
+      expect(parts.length).toBe(1);
+      expect(calls).toEqual(["gemini", "google"]);
+    } finally { globalThis.fetch = orig; }
+  });
+  it("retries Google with the second client id before giving up", async () => {
+    const urls: string[] = [];
+    try {
+      globalThis.fetch = (async (u: any) => { urls.push(String(u)); return urls.length === 1 ? new Response("no", { status: 429 }) : new Response(new Uint8Array(400).fill(7)); }) as any;
+      const parts = await synthesizeSpeech({} as any, "Hello", "en", "dr_arjun");
+      expect(parts.length).toBe(1);
+      expect(urls[0]).toContain("client=tw-ob");
+      expect(urls[1]).toContain("client=gtx");
+    } finally { globalThis.fetch = orig; }
   });
 });

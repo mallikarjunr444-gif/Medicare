@@ -4,7 +4,9 @@
 //   gemini            Official Gemini speech API. Free tier with an AI Studio key (GEMINI_API_KEY). Two doctor voices.
 //   google_translate  Keyless Google Translate speech endpoint. UNOFFICIAL: it can be rate-limited or blocked and has
 //                     one voice for both doctors. Used by `auto` only when no Gemini key is configured.
-// If synthesis fails the caller falls back to the browser's own voice; no reply text is ever invented.
+// Voice is never left to one provider: synthesizeSpeech walks a chain (Gemini -> Cloudflare Workers AI MeloTTS for
+// English -> keyless Google), each with its own short timeout, and only when all fail does the caller fall back to the
+// browser's own voice (which itself has a further audio backup in the frontend). No reply text is ever invented.
 import type { Env } from "./env";
 
 export interface SpeechPart {
@@ -102,31 +104,82 @@ async function geminiSpeak(env: Env, text: string, doctorId: string): Promise<Sp
   return { mime: "audio/wav", data: pcmBase64ToWavBase64(part.data, rate), text };
 }
 
-async function googleTranslateSpeak(text: string, language: string): Promise<SpeechPart> {
-  const tl = language === "kn" ? "kn" : language === "hi" ? "hi" : "en";
-  const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${tl}&q=${encodeURIComponent(text)}`;
-  const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0", referer: "https://translate.google.com/" } });
-  if (!res.ok) throw new Error(`tts_google_${res.status}`);
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.length < 200) throw new Error("tts_google_empty");
-  return { mime: "audio/mpeg", data: bytesToBase64(buf), text };
+/** Cloudflare Workers AI text-to-speech (MeloTTS, English only). Uses the Worker's own AI binding: no extra key, no extra host. */
+async function workersAiSpeak(env: Env, text: string): Promise<SpeechPart> {
+  if (!env.AI) throw new Error("tts_workersai_unbound");
+  const out: any = await env.AI.run("@cf/myshell-ai/melotts", { prompt: text, lang: "en" });
+  const audio = out?.audio ?? out;
+  let b64: string | null = null;
+  if (typeof audio === "string") b64 = audio.replace(/^data:[^,]*,/, "");
+  else if (audio instanceof Uint8Array || audio instanceof ArrayBuffer) b64 = bytesToBase64(audio instanceof Uint8Array ? audio : new Uint8Array(audio));
+  if (!b64 || b64.length < 200) throw new Error("tts_workersai_empty");
+  return { mime: "audio/mpeg", data: b64, text };
 }
 
-/** Synthesises a reply into ordered audio parts. Throws on failure so the caller can fall back to the device voice. */
-export async function synthesizeSpeech(env: Env, text: string, language: string, doctorId: string, timeoutMs = 7000): Promise<SpeechPart[]> {
-  const provider = ttsProvider(env);
-  if (provider === "off") return [];
-  const chunks = splitForSpeech(text).slice(0, 6);
-  if (!chunks.length) return [];
-  const work = Promise.all(
-    chunks.map((c) => (provider === "gemini" ? geminiSpeak(env, c, doctorId) : googleTranslateSpeak(c, language))),
-  );
+async function googleTranslateSpeak(text: string, language: string): Promise<SpeechPart> {
+  const tl = language === "kn" ? "kn" : language === "hi" ? "hi" : "en";
+  let lastStatus = 0;
+  // Two client ids: when one is rate-limited the other is often still served.
+  for (const client of ["tw-ob", "gtx"]) {
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=${client}&tl=${tl}&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0", referer: "https://translate.google.com/" } });
+    if (res.ok) {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.length >= 200) return { mime: "audio/mpeg", data: bytesToBase64(buf), text };
+      lastStatus = -1;
+    } else lastStatus = res.status;
+  }
+  throw new Error(lastStatus === -1 ? "tts_google_empty" : `tts_google_${lastStatus}`);
+}
+
+export type Engine = "gemini" | "workers_ai" | "google_translate";
+
+/** Ordered list of engines to try for this language. Empty when the server voice is switched off. */
+export function ttsChain(env: Pick<Env, "TTS_PROVIDER" | "GEMINI_API_KEY" | "AI">, language: string): Engine[] {
+  const want = String(env.TTS_PROVIDER || "auto").toLowerCase();
+  if (want === "off") return [];
+  const chain: Engine[] = [];
+  if (env.GEMINI_API_KEY) chain.push("gemini");
+  if (env.AI && language === "en") chain.push("workers_ai");
+  chain.push("google_translate");
+  // An explicitly named engine goes first; the others stay behind it as backups.
+  const first = want as Engine;
+  return chain.includes(first) ? [first, ...chain.filter((e) => e !== first)] : chain;
+}
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const limit = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("tts_timeout")), timeoutMs); });
+  const limit = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("tts_timeout")), ms); });
   try {
     return await Promise.race([work, limit]);
   } finally {
     clearTimeout(timer);
     work.catch(() => {}); // avoid an unhandled rejection if the timeout won
   }
+}
+
+/**
+ * Synthesises a reply into ordered audio parts, trying each engine in turn. `timeoutMs` bounds one engine; the whole
+ * chain is bounded at twice that. Throws the last error only when every engine failed, so the caller can fall back
+ * to the device voice.
+ */
+export async function synthesizeSpeech(env: Env, text: string, language: string, doctorId: string, timeoutMs = 4500): Promise<SpeechPart[]> {
+  const chain = ttsChain(env, language);
+  if (!chain.length) return [];
+  const chunks = splitForSpeech(text).slice(0, 6);
+  if (!chunks.length) return [];
+  const deadline = Date.now() + timeoutMs * 2;
+  let lastError: Error = new Error("tts_failed");
+  for (const engine of chain) {
+    const left = Math.min(timeoutMs, deadline - Date.now());
+    if (left <= 0) break;
+    try {
+      const run = (c: string) => (engine === "gemini" ? geminiSpeak(env, c, doctorId) : engine === "workers_ai" ? workersAiSpeak(env, c) : googleTranslateSpeak(c, language));
+      return await withTimeout(Promise.all(chunks.map(run)), left);
+    } catch (e) {
+      lastError = e as Error;
+      console.error("tts_engine_failed", engine, String(lastError.message).slice(0, 80));
+    }
+  }
+  throw lastError;
 }

@@ -1,9 +1,55 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { toast } from 'react-hot-toast'
 import { mouthChannel, startLipSync, type LipSyncHandle } from '@/lib/visemes'
 import type { ConsultationLanguage, DoctorId, DoctorState } from '@/lib/doctorTypes'
+
+/** Sentence-sized pieces (the audio endpoint accepts about 200 characters at a time). */
+function speechChunks(text: string, max = 170): string[] {
+  const clean = text.replace(/\*+|_{2,}|#+\s*/g, '').replace(/\s+/g, ' ').trim()
+  const sentences = clean.match(/[^.!?।॥…]+[.!?।॥…]*/g) ?? [clean]
+  const out: string[] = []
+  let cur = ''
+  for (const raw of sentences) {
+    let s = raw.trim()
+    if (!s) continue
+    while (s.length > max) {
+      let cut = Math.max(s.lastIndexOf(',', max), s.lastIndexOf(' ', max))
+      if (cut < max / 2) cut = max
+      if (cur) { out.push(cur); cur = '' }
+      out.push(s.slice(0, cut).trim())
+      s = s.slice(cut).trim()
+    }
+    if ((cur + ' ' + s).trim().length > max) { if (cur) out.push(cur); cur = s } else cur = (cur + ' ' + s).trim()
+  }
+  if (cur) out.push(cur)
+  return out.filter(Boolean)
+}
+
+/**
+ * Last-resort voice: plays the reply through an audio element from the public Google text-to-speech endpoint, which has
+ * Kannada, Hindi and English. Used when the server voice failed AND this device has no usable voice for the language.
+ */
+function playBackupVoice(text: string, lang: ConsultationLanguage, volume: () => number, onDone: () => void): { stop: () => void } {
+  const chunks = speechChunks(text)
+  let i = 0
+  let stopped = false
+  let current: HTMLAudioElement | null = null
+  const next = () => {
+    if (stopped) return
+    if (i >= chunks.length) return onDone()
+    const a = new Audio()
+    current = a
+    a.volume = volume()
+    a.src = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${lang}&q=${encodeURIComponent(chunks[i])}`
+    const advance = () => { a.onended = null; a.onerror = null; i++; next() }
+    a.onended = advance
+    a.onerror = advance // a failed piece is skipped; the captions still show it
+    a.play().catch(advance)
+  }
+  next()
+  return { stop: () => { stopped = true; if (current) { current.onended = null; current.onerror = null; current.pause(); current.removeAttribute('src') } } }
+}
 
 interface UseDoctorSpeechOptions {
   doctorId: DoctorId
@@ -19,7 +65,6 @@ export function useDoctorSpeech({
   onSubtitleUpdate,
 }: UseDoctorSpeechOptions) {
   const lipSyncRef = useRef<LipSyncHandle | null>(null)
-  const voiceHintShownRef = useRef(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
@@ -29,6 +74,8 @@ export function useDoctorSpeech({
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
   const animIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const watchdogTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const backupRef = useRef<{ stop: () => void } | null>(null)
+  const isMutedRef = useRef(false)
 
   // Initialize SpeechSynthesis and ensure voices are loaded
   useEffect(() => {
@@ -70,6 +117,7 @@ export function useDoctorSpeech({
 
   // Keep mute changes effective while a local doctor utterance is already playing.
   useEffect(() => {
+    isMutedRef.current = isMuted
     if (activeUtteranceRef.current) {
       activeUtteranceRef.current.volume = isMuted ? 0 : 1
     }
@@ -116,6 +164,8 @@ export function useDoctorSpeech({
 
       // Cancel previous speech if ongoing
       synthRef.current.cancel()
+      backupRef.current?.stop()
+      backupRef.current = null
       if (animIntervalRef.current) clearInterval(animIntervalRef.current)
       if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current)
 
@@ -132,15 +182,8 @@ export function useDoctorSpeech({
       activeUtteranceRef.current = utterance
 
       const voice = getDoctorVoice()
-      if (!voice && language !== 'en' && !voiceHintShownRef.current && synthRef.current.getVoices().length > 0) {
-        voiceHintShownRef.current = true
-        toast(
-          language === 'kn'
-            ? 'This device has no Kannada voice, so you will see captions and lip movement but hear no sound. Install "Kannada" text-to-speech (Android: Settings → Text-to-speech output) or use Hindi/English.'
-            : 'This device has no Hindi voice, so you will see captions and lip movement but hear no sound. Install a Hindi text-to-speech voice in your device settings.',
-          { duration: 9000 },
-        )
-      }
+      // The device has voices loaded but none for this language: use the audio backup so the patient still hears the doctor.
+      const noDeviceVoice = !voice && language !== 'en' && synthRef.current.getVoices().length > 0
       const bcp47Map: Record<ConsultationLanguage, string> = {
         kn: 'kn-IN',
         hi: 'hi-IN',
@@ -186,19 +229,23 @@ export function useDoctorSpeech({
         onStateChange('listening')
       }
 
+      let started = false
+      let backupUsed = false
+      const startBackup = () => {
+        if (backupUsed) return
+        backupUsed = true
+        synthRef.current?.cancel()
+        if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current)
+        watchdogTimerRef.current = setTimeout(handleEnd, Math.max(10000, (text.length / 8) * 1000 + 12000)) // never stick
+        backupRef.current = playBackupVoice(text, language, () => (isMutedRef.current ? 0 : 1), () => { backupRef.current = null; handleEnd() })
+      }
+
+      utterance.onstart = () => { started = true }
       utterance.onend = handleEnd
       utterance.onerror = (e) => {
         const err = (e as SpeechSynthesisErrorEvent).error
-        if ((err === 'language-unavailable' || err === 'synthesis-unavailable') && !voiceHintShownRef.current) {
-          voiceHintShownRef.current = true
-          toast(
-            language === 'kn'
-              ? 'No Kannada voice found on this device. Install "Kannada" in Settings → Text-to-speech output to hear the doctor.'
-              : 'No voice found for this language on this device. Install it in Settings → Text-to-speech output to hear the doctor.',
-            { duration: 9000 },
-          )
-        }
-        handleEnd()
+        if (err === 'canceled' || err === 'interrupted') return handleEnd()
+        startBackup() // any real failure of the device voice: the audio backup speaks instead
       }
 
       // Watchdog: Chrome sometimes never fires onend (or stalls on long text). Poll until playback really stops,
@@ -209,6 +256,8 @@ export function useDoctorSpeech({
         const synth = synthRef.current
         const elapsed = Date.now() - startedAt
         if (!synth || activeUtteranceRef.current !== utterance) return
+        if (backupUsed) return
+        if (!started && elapsed > 2500) { startBackup(); return } // the device voice never began: it is silent
         if (elapsed > hardCapMs) {
           synth.cancel()
           handleEnd()
@@ -223,7 +272,8 @@ export function useDoctorSpeech({
       }
       watchdogTimerRef.current = setTimeout(tick, 1500)
 
-      synthRef.current.speak(utterance)
+      if (noDeviceVoice) startBackup()
+      else synthRef.current.speak(utterance)
     },
     [doctorId, language, isMuted, getDoctorVoice, onStateChange, onSubtitleUpdate]
   )
@@ -231,6 +281,8 @@ export function useDoctorSpeech({
   // Barge-In & Instant Patient Interruption
   const interrupt = useCallback(() => {
     lipSyncRef.current?.stop()
+    backupRef.current?.stop()
+    backupRef.current = null
     if (synthRef.current) {
       synthRef.current.cancel()
     }
@@ -253,8 +305,10 @@ export function useDoctorSpeech({
 
   /** Silence the device voice without changing the doctor's state (used when server audio takes over). */
   const cancelLocalSpeech = useCallback(() => {
-    if (!activeUtteranceRef.current && !synthRef.current?.speaking) return
+    if (!activeUtteranceRef.current && !synthRef.current?.speaking && !backupRef.current) return
     lipSyncRef.current?.stop()
+    backupRef.current?.stop()
+    backupRef.current = null
     synthRef.current?.cancel()
     activeUtteranceRef.current = null
     if (animIntervalRef.current) clearInterval(animIntervalRef.current)

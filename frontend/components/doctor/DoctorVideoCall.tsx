@@ -453,7 +453,8 @@ export function DoctorVideoCall({
         toast.error(event.message, { id: 'consultation-backend-error' })
         break
       case 'tts_fallback':
-        toast(event.message, { icon: '⚠️', duration: 5000, id: 'tts-fallback' })
+        // Not an error for the patient: the device voice (with an audio backup) speaks instead. No warning toast.
+        console.info('server voice unavailable; using device voice', event.engine)
         break
       case 'status':
         if (event.stage === 'animation' && !doctorVideoActiveRef.current) {
@@ -472,6 +473,7 @@ export function DoctorVideoCall({
   const {
     sendText: sendTextToBackend,
     sendFrame: sendFrameToBackend,
+    sendObservations: sendObservationsToBackend,
     interrupt: interruptBackend,
   } = doctorBackend
 
@@ -1025,6 +1027,7 @@ export function DoctorVideoCall({
                 onStatusChange={setCameraReport}
                 onToggleMic={toggleMicListening}
                 onFrame={sendFrameToBackend}
+                onObservations={sendObservationsToBackend}
               />
             </div>
 

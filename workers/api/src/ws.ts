@@ -4,6 +4,7 @@ import { sha256Hex } from "./crypto";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
 import { synthesizeSpeech } from "./tts";
+import { describeObservations, OBSERVATION_RULES } from "./cameraNotes";
 import type { Env, Query } from "./env";
 
 const LANGS: Record<string, string> = { kn: "Kannada (ಕನ್ನಡ script)", en: "English", hi: "Hindi (देवनागरी script)" };
@@ -413,6 +414,11 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         void observe(data.image);
         return;
       }
+      case "observations": {
+        // Numbers measured on the patient's device; kept in memory for this call only.
+        cameraNotes = describeObservations(data.summary);
+        return;
+      }
       case "set_voice":
         return;
     }
@@ -422,6 +428,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   // The doctor watches the patient's camera. A small frame is described by a free vision model; if something is
   // notable the doctor asks about it, gently, like a clinician would. Observations are never stored or diagnosed.
   let lastObserved = 0;
+  let cameraNotes: string | null = null; // latest camera measurements (see cameraNotes.ts); never stored
   async function observe(image: unknown) {
     const now = Date.now();
     if (owner || !env.AI || typeof image !== "string" || now - lastObserved < 15_000) return;
@@ -535,7 +542,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       }
       const refs = await retrieve(query, doctorId, searchText);
       const lang = LANGS[language] ?? language;
-      const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-3 short sentences, no markdown or lists.${refs}`;
+      const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-3 short sentences, no markdown or lists.${refs}${cameraNotes ? `\n${cameraNotes} ${OBSERVATION_RULES}` : ""}`;
       const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist], language, (t) => send({ type: "token", token: t }), mine);
       if (mine.aborted) return;
       const content = validateAiResponse(reply.trim()) || "I'm here. Could you tell me a little more?";
