@@ -426,8 +426,15 @@ export class PortraitWarp {
     const loop = [60, 61, 62, 63, 64, 65, 66, 67].map(at)
     const cx = loop.reduce((sum, q) => sum + q[0], 0) / loop.length
     const cy = loop.reduce((sum, q) => sum + q[1], 0) / loop.length
+    // Work in the mouth's own frame: the head may be tilted, but the teeth rows must stay level with the lips,
+    // upper and lower rows facing each other with a shared centre line.
+    const ang = Math.atan2(loop[4][1] - loop[0][1], loop[4][0] - loop[0][0])
+    const ca = Math.cos(-ang), sa = Math.sin(-ang)
     // Pull the outline slightly inside the lips so interior colour never spills onto them.
-    const ring = loop.map((q): [number, number] => [cx + (q[0] - cx) * 0.94, cy + (q[1] - cy) * 0.86])
+    const ring = loop.map((q): [number, number] => {
+      const dx = (q[0] - cx) * 0.94, dy = (q[1] - cy) * 0.86
+      return [cx + dx * ca - dy * sa, cy + dx * sa + dy * ca]
+    })
     const top = Math.min(...ring.map((q) => q[1]))
     const bottom = Math.max(...ring.map((q) => q[1]))
     const left = Math.min(...ring.map((q) => q[0]))
@@ -447,6 +454,8 @@ export class PortraitWarp {
       return p
     }
     const path = lens(ring)
+    ctx.save()
+    ctx.translate(cx, cy); ctx.rotate(ang); ctx.translate(-cx, -cy)
 
     // Soft-edged cavity so the opening melts into the lips: nearly black at the back, warm red toward the lips.
     ctx.save()
@@ -564,7 +573,7 @@ export class PortraitWarp {
       const loLen = Math.min(h * 0.34, (open - 0.45) * h * 0.7)
       ctx.fillStyle = gumG(bottom + 1, bottom - loLen * 0.45)
       ctx.fillRect(left, bottom - loLen * 0.34, w, loLen * 0.4 + 1)
-      row(-1, 0.66, [0.7, 0.62, 0.72, 0.58, 0.5], [1, 0.95, 1, 0.8, 0.72], loLen, 6)
+      row(-1, 0.7, widths, [1, 0.95, 1, 0.8, 0.72], loLen, 6)
     }
 
     // Dark corridors at both corners: teeth recede into shadow, as in real photographs.
@@ -586,6 +595,7 @@ export class PortraitWarp {
     shadeLow.addColorStop(1, 'rgba(10,2,3,0.4)')
     ctx.fillStyle = shadeLow
     ctx.fillRect(left - 2, bottom - h * 0.3, w + 4, h * 0.3 + 2)
+    ctx.restore()
     ctx.restore()
   }
 
