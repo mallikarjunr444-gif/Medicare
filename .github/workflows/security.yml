@@ -44,7 +44,7 @@ jobs:
     defaults: { run: { working-directory: workers/api } }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: workers/api/package-lock.json }
       - run: npm ci
       - run: npm audit --audit-level=high
@@ -55,7 +55,7 @@ jobs:
     defaults: { run: { working-directory: frontend } }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
       # Fails only on critical; the 4 remaining highs are the unused firebase/firestore->grpc-js chain (documented).
