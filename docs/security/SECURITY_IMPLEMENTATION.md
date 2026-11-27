@@ -9,6 +9,7 @@
 - `frontend/public/_headers`: CSP, HSTS, COOP. `frontend/lib/api.ts`: placeholder token never sent.
 - `frontend/package-lock.json`: dependency fixes (next 16.4.6).
 - `.github/workflows/security.yml`, `.github/dependabot.yml`, `.gitleaks.toml`.
+- `frontend/firebase.json`, `frontend/.firebaserc`, `.github/workflows/deploy-firebase-hosting.yml` (manual-only Firebase Hosting deploy; headers mirror `_headers`).
 
 ## Known limits of what was implemented
 - **Login throttle is in-memory per Worker isolate.** A distributed attacker, or isolate recycling, can exceed it. A durable version needs a Neon table or Workers KV/Durable Object (requires a migration or a new binding; not applied without approval).
