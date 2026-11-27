@@ -95,10 +95,11 @@ export const api = {
     return response.data
   },
 
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string, otp?: string) => {
     const formData = new URLSearchParams()
     formData.append('username', email)
     formData.append('password', password)
+    if (otp) formData.append('otp', otp)
     const response = await apiClient.post('/api/v1/users/login', formData, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
@@ -122,6 +123,23 @@ export const api = {
     } catch {
       /* network error on logout is non-fatal */
     }
+  },
+
+  // ── Account protection ────────────────────────────────────────────────────
+  forgotPassword: async (email: string) => (await apiClient.post('/api/v1/users/forgot-password', { email })).data as { detail: string },
+  resetPassword: async (token: string, password: string) => (await apiClient.post('/api/v1/users/reset-password', { token, password })).data as { detail: string },
+  verifyEmail: async (token: string) => (await apiClient.post('/api/v1/users/verify-email', { token })).data as { detail: string },
+  requestVerification: async () => (await apiClient.post('/api/v1/users/request-verification', {})).data as { detail: string; sent: boolean },
+  mfaSetup: async (password: string) => (await apiClient.post('/api/v1/users/me/mfa/setup', { password })).data as { secret: string; otpauth_uri: string },
+  mfaEnable: async (code: string) => (await apiClient.post('/api/v1/users/me/mfa/enable', { code })).data as { recovery_codes: string[] },
+  mfaDisable: async (password: string, code: string) => (await apiClient.post('/api/v1/users/me/mfa/disable', { password, code })).data as { detail: string },
+  logoutAll: async () => (await apiClient.post('/api/v1/users/logout-all', {})).data as { detail: string },
+  exportMyData: async (): Promise<Blob> => (await apiClient.get('/api/v1/users/me/export', { responseType: 'blob' })).data as Blob,
+  deleteAccount: async (password: string | undefined, code: string | undefined) =>
+    (await apiClient.delete('/api/v1/users/me', { data: { confirm: 'DELETE', password, code } })).data as { detail: string },
+  changePassword: async (currentPassword: string, password: string) => {
+    const r = (await apiClient.put('/api/v1/users/me', { current_password: currentPassword, password })).data as { access_token?: string }
+    return r.access_token ?? null
   },
 
   getProfile: async () => {
@@ -382,6 +400,23 @@ export function buildSessionWsUrl(sessionId: string): string {
   const token = readToken()
   const path = `${wsBase}/ws/session/${encodeURIComponent(sessionId)}`
   return token ? `${path}?token=${encodeURIComponent(token)}` : path
+}
+
+/**
+ * Preferred: exchange the session for a one-time, 60-second ticket so no long-lived credential appears in the URL.
+ * Falls back to the legacy `?token=` URL only if the ticket endpoint is unavailable (e.g. API not yet redeployed).
+ */
+export async function getSessionWsUrl(sessionId: string): Promise<string> {
+  try {
+    const { data } = await apiClient.post('/api/v1/users/ws-ticket', {})
+    if (data?.ticket) {
+      const rawUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      return `${rawUrl.replace(/^http/, 'ws')}/ws/session/${encodeURIComponent(sessionId)}?ticket=${encodeURIComponent(data.ticket)}`
+    }
+  } catch {
+    /* fall through */
+  }
+  return buildSessionWsUrl(sessionId)
 }
 
 export { apiClient }

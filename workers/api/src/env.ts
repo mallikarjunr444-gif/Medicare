@@ -5,6 +5,14 @@ export interface Env {
   /** Public Firebase project id (not a secret). Firebase sign-in is disabled while unset. */
   FIREBASE_PROJECT_ID?: string;
   SENTRY_DSN?: string;
+  /** Transactional email (Resend-compatible). Verification/reset emails are not sent while unset. */
+  EMAIL_API_KEY?: string;
+  EMAIL_FROM?: string;
+  EMAIL_API_URL?: string;
+  /** Public frontend URL used in email links (defaults to the first CORS origin). */
+  APP_URL?: string;
+  /** Optional dedicated key for encrypting MFA secrets (defaults to a HKDF derivation of JWT_SECRET_KEY). */
+  MFA_ENC_KEY?: string;
   // Vars
   ENVIRONMENT: string;
   CORS_ORIGINS: string;
@@ -72,4 +80,9 @@ export interface DbUser {
   gender?: string | null;
   updated_at?: Date | string | null;
   last_login_at?: Date | string | null;
+  token_version?: number;
+  email_verified_at?: Date | string | null;
+  mfa_enabled?: boolean;
+  mfa_secret_enc?: string | null;
+  mfa_last_step?: number | null;
 }

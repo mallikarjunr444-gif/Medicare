@@ -5,6 +5,7 @@ import { CalendarClock, Check, Loader2, LogOut, Mail, ShieldCheck } from 'lucide
 import { toast } from 'react-hot-toast'
 import { UserAvatar } from '@/components/auth/UserAvatar'
 import { useAuth } from '@/lib/auth/AuthProvider'
+import { SecuritySettings } from './SecuritySettings'
 import type { Gender, ProfileUpdate } from '@/lib/types'
 
 const GENDERS: { value: Gender; label: string }[] = [
@@ -124,7 +125,7 @@ export function ProfilePage() {
       <div className="mt-6 rounded-[1.75rem] border border-[#d2d2d7] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,.04)] sm:p-8">
         <h2 className="text-lg font-semibold tracking-tight text-[#1d1d1f]">Account</h2>
         <dl className="mt-4 divide-y divide-[#f0f0f3] text-sm">
-          <div className="flex items-center justify-between gap-4 py-3"><dt className="flex items-center gap-2 text-[#6e6e73]"><ShieldCheck size={15} aria-hidden="true" />Sign-in method</dt><dd className="font-medium text-[#1d1d1f]">Google</dd></div>
+          <div className="flex items-center justify-between gap-4 py-3"><dt className="flex items-center gap-2 text-[#6e6e73]"><ShieldCheck size={15} aria-hidden="true" />Sign-in method</dt><dd className="font-medium text-[#1d1d1f]">{profile.firebase_uid ? 'Google' : 'Email and password'}</dd></div>
           <div className="flex items-center justify-between gap-4 py-3"><dt className="flex items-center gap-2 text-[#6e6e73]"><CalendarClock size={15} aria-hidden="true" />Member since</dt><dd className="font-medium text-[#1d1d1f]">{fmt(profile.created_at)}</dd></div>
           <div className="flex items-center justify-between gap-4 py-3"><dt className="flex items-center gap-2 text-[#6e6e73]"><CalendarClock size={15} aria-hidden="true" />Last sign-in</dt><dd className="font-medium text-[#1d1d1f]">{fmt(profile.last_login_at)}</dd></div>
           <div className="flex items-center justify-between gap-4 py-3"><dt className="text-[#6e6e73]">Account ID</dt><dd className="font-mono text-xs text-[#1d1d1f]">…{(profile.firebase_uid ?? profile.id).slice(-8)}</dd></div>
@@ -133,6 +134,7 @@ export function ProfilePage() {
           {signingOut ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <LogOut size={15} aria-hidden="true" />}Sign out
         </button>
       </div>
+      <SecuritySettings />
     </section>
   )
 }

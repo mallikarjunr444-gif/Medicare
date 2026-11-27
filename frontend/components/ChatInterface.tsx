@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { api, buildSessionWsUrl } from '@/lib/api'
+import { api, getSessionWsUrl } from '@/lib/api'
 import { VoiceActivityDetector } from '@/lib/vad'
 import { useStore } from '@/store/useStore'
 import type { Avatar, ChatMessage, WsMessage } from '@/lib/types'
@@ -359,8 +359,10 @@ export function ChatInterface({ avatarId, voiceId, resumeSessionId, onSessionCre
     },
   })
 
-  const connectWebSocket = useCallback((sid: string) => {
-    const websocket = new WebSocket(buildSessionWsUrl(sid))
+  const connectWebSocket = useCallback(async (sid: string) => {
+    const wsUrl = await getSessionWsUrl(sid)
+    if (sessionIdRef.current !== sid) return // session ended/changed while the one-time ticket was being issued
+    const websocket = new WebSocket(wsUrl)
     const wasFreshConnect = reconnectAttemptsRef.current === 0
 
     websocket.onopen = () => {

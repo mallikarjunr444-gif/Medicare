@@ -30,6 +30,8 @@ export const profileOut = (u: DbUser) => ({
   created_at: iso(u.created_at),
   updated_at: iso(u.updated_at),
   last_login_at: iso(u.last_login_at),
+  email_verified: !!u.email_verified_at,
+  mfa_enabled: !!u.mfa_enabled,
 });
 
 // ── POST /api/v1/auth/firebase: sign-in / sign-up ────────────────────────────

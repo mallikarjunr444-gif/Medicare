@@ -1,5 +1,6 @@
 import { userIdFromToken } from "./auth";
 import { wsOriginAllowed } from "./security";
+import { sha256Hex } from "./crypto";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
 import { synthesizeSpeech } from "./tts";
@@ -348,7 +349,16 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   }
 
   const query = makeQuery(env);
-  const uid = token ? await userIdFromToken(env, query, token) : null;
+  // Preferred: one-time 60 s ticket (POST /api/v1/users/ws-ticket). Legacy ?token= / cookie still accepted.
+  const ticket = url.searchParams.get("ticket");
+  let uid: string | null = null;
+  if (ticket) {
+    const claimed = await query(
+      `UPDATE auth_tokens SET used_at = now() WHERE token_hash = $1 AND kind = 'ws_ticket' AND used_at IS NULL AND expires_at > now() RETURNING user_id`,
+      [await sha256Hex(ticket)],
+    ).catch(() => []);
+    uid = (claimed[0]?.user_id as string | undefined) ?? null;
+  } else if (token) uid = await userIdFromToken(env, query, token);
   const session = uid
     ? (await query(
         `SELECT s.id, s.status, a.avatar_metadata AS meta FROM sessions s JOIN avatars a ON a.id = s.avatar_id

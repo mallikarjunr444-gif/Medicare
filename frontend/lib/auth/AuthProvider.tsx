@@ -19,6 +19,11 @@ interface AuthContextValue {
   /** A sign-in popup or redirect is in progress. */
   busy: boolean
   signInWithGoogle: () => Promise<void>
+  /** Email + password sign-in. Resolves { mfaRequired: true } when the account needs an authenticator/recovery code. */
+  signInWithPassword: (email: string, password: string, otp?: string) => Promise<{ mfaRequired: boolean }>
+  signUpWithPassword: (data: { email: string; username: string; password: string; full_name?: string }) => Promise<void>
+  /** True for email/password sessions (as opposed to Google). */
+  isPasswordAccount: boolean
   signOut: () => Promise<void>
   /** Retry the profile sync after a failure (e.g. the API was briefly unreachable). */
   retry: () => Promise<void>
@@ -66,6 +71,8 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   const userRef = useRef<User | null>(null)
   const syncedUid = useRef<string | null>(null)
   const inflight = useRef<Promise<void> | null>(null)
+  const emailSession = useRef(false)
+  const [isPasswordAccount, setIsPasswordAccount] = useState(false)
 
   const resetLocalState = useCallback(() => {
     // Nothing from one person's session may be visible to the next: drop cached API data and the guest identity.
@@ -95,10 +102,32 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     return run
   }, [])
 
+  const finishEmailSession = useCallback(async () => {
+    const me = await api.getProfile()
+    if (me.is_guest) throw new Error('guest')
+    const p = await api.getMyProfile()
+    emailSession.current = true
+    setIsPasswordAccount(true)
+    setProfile(p)
+    setError(null)
+    setStatus('signed-in')
+  }, [])
+
+  // Restore an email/password session (httpOnly cookie or stored bearer) after a reload.
+  const restoredEmail = useRef(false)
+  useEffect(() => {
+    if (restoredEmail.current) return
+    restoredEmail.current = true
+    if (!api.getToken()) return
+    finishEmailSession().catch(() => {
+      /* not an email account (guest/expired): leave state to the Firebase listener */
+    })
+  }, [finishEmailSession])
+
   useEffect(() => {
     const fb = getFirebase()
     if (!fb) {
-      setStatus('signed-out')
+      if (!emailSession.current) setStatus((st) => (st === 'signed-in' ? st : 'signed-out'))
       return
     }
     // Finishes a redirect sign-in (and reports its errors) when the page loads after Google sends the user back.
@@ -109,6 +138,7 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     return onIdTokenChanged(fb.auth, async (user) => {
       userRef.current = user
       if (!user) {
+        if (emailSession.current) return // an email/password session is active; Firebase has nothing to say
         const hadUser = syncedUid.current !== null
         syncedUid.current = null
         setFirebaseAuth(null, null)
@@ -159,13 +189,57 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     const fb = getFirebase()
     try {
       if (fb) await firebaseSignOut(fb.auth)
-      await api.logout() // clears any server cookie from the older email/password flow
+      await api.logout() // revokes the server token and clears the cookie
+      if (emailSession.current) {
+        emailSession.current = false
+        setIsPasswordAccount(false)
+        setProfile(null)
+        setStatus('signed-out')
+        resetLocalState()
+      }
     } catch {
       toast.error('Could not sign out. Please try again.')
       return
     }
     toast.success('Signed out')
-  }, [])
+  }, [resetLocalState])
+
+  const signInWithPassword = useCallback(async (email: string, password: string, otp?: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.login(email.trim(), password, otp)
+      useStore.getState().setAuth(res.access_token, { id: '', email, username: '', is_guest: false })
+      await finishEmailSession()
+      return { mfaRequired: false }
+    } catch (e) {
+      const r = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response
+      if (r?.status === 403 && r.data?.detail === 'mfa_required') return { mfaRequired: true }
+      const detail = typeof r?.data?.detail === 'string' ? r.data.detail : ''
+      if (r?.status === 401) setError(otp ? 'That code was not accepted. Try again or use a recovery code.' : 'Incorrect email or password.')
+      else if (r?.status === 429) setError(detail || 'Too many attempts. Please wait a few minutes and try again.')
+      else setError(detail || 'We could not sign you in. Please try again.')
+      throw e
+    } finally {
+      setBusy(false)
+    }
+  }, [finishEmailSession])
+
+  const signUpWithPassword = useCallback(async (data: { email: string; username: string; password: string; full_name?: string }) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.register(data)
+    } catch (e) {
+      const r = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response
+      const d = r?.data?.detail
+      setError(r?.status === 409 && typeof d === 'string' ? d : r?.status === 422 ? 'Please check the details: a valid email, a username of 3-39 letters/numbers, and a password of 8-128 characters.' : 'We could not create your account. Please try again.')
+      setBusy(false)
+      throw e
+    }
+    setBusy(false)
+    await signInWithPassword(data.email, data.password)
+  }, [signInWithPassword])
 
   // Stable identity: consumers call this from effects, and a new function per error change would re-run them and wipe the message.
   const clearError = useCallback(() => setError(null), [])
@@ -185,8 +259,8 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, profile, error, busy, signInWithGoogle, signOut, retry, updateProfile, clearError }),
-    [status, profile, error, busy, signInWithGoogle, signOut, retry, updateProfile, clearError],
+    () => ({ status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, isPasswordAccount, signOut, retry, updateProfile, clearError }),
+    [status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, isPasswordAccount, signOut, retry, updateProfile, clearError],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
