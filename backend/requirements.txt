@@ -95,7 +95,7 @@ gtts==2.5.1
 pydub==0.25.1
 
 # Avatar Animation
-face-alignment==1.4.1
+face-alignment==1.5.0
 imageio==2.33.1
 imageio-ffmpeg==0.4.9
 scikit-image==0.22.0
