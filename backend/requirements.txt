@@ -43,7 +43,7 @@ boto3==1.40.61
 aioboto3==15.5.0
 
 # WebSocket
-websockets==15.0.1
+websockets==17.4
 python-socketio==5.16.2
 
 # AI/ML
