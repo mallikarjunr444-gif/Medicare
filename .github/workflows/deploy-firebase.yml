@@ -1,0 +1,56 @@
+name: Deploy website to Firebase Hosting
+
+# MANUAL ONLY: nothing deploys until you press "Run workflow" (Actions tab).
+# Builds the same static export as the Cloudflare workflow and publishes frontend/out to Firebase Hosting.
+# The API (Cloudflare Worker + Neon) is unchanged; the site just talks to it from the Firebase address.
+#
+# One-time setup (see docs/FIREBASE_AUTH_SETUP.md):
+#   Variables: NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_APP_ID
+#   Secret:    FIREBASE_SERVICE_ACCOUNT  (service-account JSON with the "Firebase Hosting Admin" role)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-firebase
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_URL: https://medicare-api-prod.mallikarjunr444.workers.dev
+      NEXT_PUBLIC_WS_URL: wss://medicare-api-prod.mallikarjunr444.workers.dev
+      NEXT_PUBLIC_SITE_URL: https://${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}.web.app
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required configuration
+        run: |
+          missing=0
+          for v in NEXT_PUBLIC_FIREBASE_API_KEY NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN NEXT_PUBLIC_FIREBASE_PROJECT_ID NEXT_PUBLIC_FIREBASE_APP_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Repository variable $v is not set"; missing=1; fi
+          done
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then echo "::error::Repository secret FIREBASE_SERVICE_ACCOUNT is not set"; missing=1; fi
+          exit $missing
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          channelId: live
