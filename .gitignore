@@ -119,3 +119,6 @@ Thumbs.db
 
 # Local environment backups
 .env.bak-*
+
+# Firebase CLI cache
+.firebase/
