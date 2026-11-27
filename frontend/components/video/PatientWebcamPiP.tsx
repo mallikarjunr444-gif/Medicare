@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useHumanCheck, type HumanCheck } from '@/lib/vision/useHumanCheck'
 import {
-  Camera,
   CameraOff,
   Mic,
   MicOff,
@@ -13,11 +13,18 @@ import {
   ChevronUp,
 } from 'lucide-react'
 
+export type CameraStatus = 'starting' | 'live' | 'denied' | 'no_camera' | 'in_use' | 'lost' | 'unsupported'
+export interface CameraReport { camera: CameraStatus; human: HumanCheck }
+
 interface PatientWebcamPiPProps {
+  /** The consultation is active, so the camera must be on. There is no off switch: the camera is required. */
   isCameraOn: boolean
   isMicOn: boolean
-  onToggleCamera: () => void
   onToggleMic: () => void
+  /** Increase to ask the browser for the camera again (after the patient fixed a permission or closed another app). */
+  retryToken?: number
+  /** Camera state and the person-or-not check, reported whenever either changes. */
+  onStatusChange?: (r: CameraReport) => void
   /** Called with a small JPEG data URL when the picture changes noticeably (the doctor watches for changes). */
   onFrame?: (jpegDataUrl: string) => void
   className?: string
@@ -26,15 +33,15 @@ interface PatientWebcamPiPProps {
 export function PatientWebcamPiP({
   isCameraOn,
   isMicOn,
-  onToggleCamera,
   onToggleMic,
+  retryToken = 0,
+  onStatusChange,
   onFrame,
   className = '',
 }: PatientWebcamPiPProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>('starting')
   const [isMinimized, setIsMinimized] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const onFrameRef = useRef(onFrame)
@@ -82,54 +89,49 @@ export function PatientWebcamPiP({
 
   useEffect(() => {
     let active = true
+    const release = () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
+    }
 
     async function setupCamera() {
-      if (!isCameraOn) {
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop())
-          streamRef.current = null
-        }
-        if (videoRef.current) {
-          videoRef.current.srcObject = null
-        }
-        return
-      }
-
+      if (!isCameraOn) { release(); return }
+      setCameraStatus('starting')
+      if (!navigator.mediaDevices?.getUserMedia) { setCameraStatus('unsupported'); return }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
           audio: false,
         })
-
-        if (!active) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-
+        if (!active) { stream.getTracks().forEach((t) => t.stop()); return }
         streamRef.current = stream
+        const track = stream.getVideoTracks()[0]
+        // Unplugged, permission revoked, or covered by the system: the camera is gone and the call must say so.
+        track?.addEventListener('ended', () => { if (active) setCameraStatus('lost') })
+        track?.addEventListener('mute', () => { if (active) setCameraStatus('lost') })
+        track?.addEventListener('unmute', () => { if (active) setCameraStatus('live') })
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           videoRef.current.play().catch(() => {})
         }
-        setHasPermission(true)
-        setErrorMessage(null)
-      } catch (err: any) {
+        setCameraStatus('live')
+      } catch (err) {
         if (!active) return
-        setHasPermission(false)
-        setErrorMessage('Camera access was denied or is unavailable.')
+        const name = (err as DOMException)?.name
+        setCameraStatus(name === 'NotFoundError' || name === 'OverconstrainedError' ? 'no_camera' : name === 'NotReadableError' || name === 'AbortError' ? 'in_use' : 'denied')
       }
     }
 
     setupCamera()
+    return () => { active = false; release() }
+  }, [isCameraOn, retryToken])
 
-    return () => {
-      active = false
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop())
-        streamRef.current = null
-      }
-    }
-  }, [isCameraOn])
+  // Is it a person? Runs only while the camera is live.
+  const human = useHumanCheck(videoRef, isCameraOn && cameraStatus === 'live')
+  const onStatusRef = useRef(onStatusChange)
+  useEffect(() => { onStatusRef.current = onStatusChange }, [onStatusChange])
+  useEffect(() => { onStatusRef.current?.({ camera: cameraStatus, human }) }, [cameraStatus, human])
 
   if (isMinimized) {
     return (
@@ -172,18 +174,18 @@ export function PatientWebcamPiP({
         </div>
       )}
 
-      {/* Error State */}
-      {isCameraOn && hasPermission === false && (
+      {/* Camera problem (the call shows full instructions) */}
+      {isCameraOn && cameraStatus !== 'live' && cameraStatus !== 'starting' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-clinic-ink p-2 text-center text-[13px] font-semibold text-white">
           <CameraOff size={20} className="mb-1" aria-hidden="true" />
-          <span>Camera blocked. Allow it in your browser.</span>
+          <span>Camera is off</span>
         </div>
       )}
 
       {/* Label Badge Overlay */}
       <div className="absolute bottom-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[12px] font-semibold text-white">
-        <span className={`h-1.5 w-1.5 rounded-full ${isCameraOn ? 'bg-teal-300' : 'bg-slate-400'}`} aria-hidden="true" />
-        <span>You</span>
+        <span className={`h-1.5 w-1.5 rounded-full ${cameraStatus === 'live' && human.state === 'human' ? 'bg-teal-300' : cameraStatus === 'live' ? 'bg-amber-300' : 'bg-slate-400'}`} aria-hidden="true" />
+        <span>{cameraStatus === 'live' && human.state === 'animal' ? `Not a person${human.animal ? ` (${human.animal})` : ''}` : 'You'}</span>
       </div>
 
       {/* Quick Camera, Mic, Minimize & Expand Controls */}
@@ -196,16 +198,6 @@ export function PatientWebcamPiP({
           title={isMicOn ? 'Turn microphone off' : 'Turn microphone on'} aria-label={isMicOn ? 'Turn microphone off' : 'Turn microphone on'}
         >
           {isMicOn ? <Mic size={15} /> : <MicOff size={15} />}
-        </button>
-
-        <button
-          onClick={onToggleCamera}
-          className={`h-8 w-8 flex items-center justify-center rounded-lg text-white transition-colors ${
-            isCameraOn ? 'bg-black/60 hover:bg-black/80' : 'bg-clinic-brick hover:bg-clinic-brick-deep'
-          }`}
-          title={isCameraOn ? 'Turn camera off' : 'Turn camera on'} aria-label={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
-        >
-          {isCameraOn ? <Camera size={15} /> : <CameraOff size={15} />}
         </button>
 
         <button
