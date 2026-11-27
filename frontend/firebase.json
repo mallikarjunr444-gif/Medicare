@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "medicare-care",
     "public": "out",
     "cleanUrls": true,
     "ignore": [
