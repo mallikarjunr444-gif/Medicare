@@ -2,6 +2,7 @@ import { Hono } from "hono/tiny";
 import { requireUser } from "./auth";
 import type { AppVars, Env } from "./env";
 import { fail } from "./http";
+import { SCOPE_RULES } from "./scope";
 
 export const DOCTORS: Record<string, { name: string; specialty: string; image: string }> = {
   dr_ananya: {
@@ -18,7 +19,7 @@ SAFETY: if the user expresses suicidal thoughts, self-harm or immediate danger, 
 FORMAT: 1-3 short spoken sentences, no lists or markdown, no restarting with greetings, never read URLs aloud.`;
 
 export function systemPrompt(doctorId: string): string {
-  if (doctorId === "dr_ananya") return ANANYA_PROMPT;
+  if (doctorId === "dr_ananya") return `${ANANYA_PROMPT}\n${SCOPE_RULES}`;
   const d = DOCTORS[doctorId] ?? DOCTORS.dr_arjun;
   return (
     `You are MediCare's AI doctor persona named ${d.name}, focused on ${d.specialty}. ` +
@@ -27,7 +28,8 @@ export function systemPrompt(doctorId: string): string {
     "Give practical general guidance, and suggest clinician review only when symptoms or uncertainty make it relevant. " +
     "For possible emergencies give clear urgent-care instructions (India: call 112) immediately. " +
     "Be transparent that you are an AI assistant, not a human clinician. Do not invent a biography, credentials or studies; do not diagnose or prescribe. " +
-    "Keep replies to 1-3 short spoken sentences, no lists or markdown."
+    "Keep replies to 1-3 short spoken sentences, no lists or markdown. " +
+    SCOPE_RULES
   );
 }
 

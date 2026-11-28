@@ -3,6 +3,7 @@ import { wsOriginAllowed } from "./security";
 import { sha256Hex } from "./crypto";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
+import { checkScope, scopeRefusal } from "./scope";
 import { synthesizeSpeech } from "./tts";
 import type { Env, Query } from "./env";
 
@@ -531,6 +532,18 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         ]);
         await sendVoice(reply, mine);
         send({ type: "message", role: "assistant", content: reply, triage: 4, is_emergency: true });
+        return;
+      }
+      // Scope boundary: health topics only. Runs after emergency triage (a crisis is never refused) and before the model.
+      const scope = checkScope(text, searchText);
+      if (!scope.allowed) {
+        const reply = scopeRefusal(scope.reason, language);
+        await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [
+          crypto.randomUUID(), sessionId, reply,
+        ]);
+        await sendVoice(reply, mine);
+        if (mine.aborted) return;
+        send({ type: "message", role: "assistant", content: reply, out_of_scope: true });
         return;
       }
       const refs = await retrieve(query, doctorId, searchText);
