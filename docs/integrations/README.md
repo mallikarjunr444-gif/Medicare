@@ -70,6 +70,6 @@ token/session check (revocable, versioned) → role (RBAC) → per-record owners
 ## Where things are
 
 - Worker: `workers/api/src/{captcha,appcheck,scrub,audit}.ts`, `routes/{care,account,admin}.ts`, `migrations/004_open_source_integrations.sql`
-- Website: `lib/{captcha,appcheck}.ts`, `components/{Analytics.tsx,auth/EmailAuthForm.tsx}`
+- Website: `lib/{captcha,appcheck}.ts`, `components/{Analytics.tsx,auth/EmailAuthForm.tsx,profile/PrivacySharing.tsx}` (profile page: consent toggles, doctor access grants, FHIR download)
 - Rules/config: `frontend/{firestore,storage}.rules`, `frontend/firebase.json`, `.env.integrations.example`, `.github/workflows/uptime.yml`
 - Setup: [SETUP.md](SETUP.md) · Tests: [TESTING.md](TESTING.md) · Security reports: [../security](../security)

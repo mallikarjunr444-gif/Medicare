@@ -6,6 +6,7 @@
 | Worker tests (Vitest + in-process Postgres incl. pgcrypto) | **192 / 192 pass**; 31 are new in `test/integrations.test.ts` |
 | Website production build (`next build`, static export) | succeeds |
 | Browser (Chromium, mocked API, real CSP) — `captcha → email code → sign-in`, wrong code, sign-up carries proof, captcha-off path | 8/8 pass, 0 CSP violations |
+| Browser — profile "Privacy and sharing": consent gates the doctor form, grant, revoke, FHIR download | 7/7 pass, 0 CSP violations |
 | Migration 004 on Neon dev branch | applied; column, 2 tables and constraint verified |
 
 ## Mutation checks (do the tests catch regressions?)

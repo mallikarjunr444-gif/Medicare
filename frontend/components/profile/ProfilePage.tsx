@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast'
 import { UserAvatar } from '@/components/auth/UserAvatar'
 import { useAuth } from '@/lib/auth/AuthProvider'
 import { SecuritySettings } from './SecuritySettings'
+import { PrivacySharing } from './PrivacySharing'
 import type { Gender, ProfileUpdate } from '@/lib/types'
 
 const GENDERS: { value: Gender; label: string }[] = [
@@ -134,6 +135,7 @@ export function ProfilePage() {
           {signingOut ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <LogOut size={15} aria-hidden="true" />}Sign out
         </button>
       </div>
+      <PrivacySharing />
       <SecuritySettings />
     </section>
   )
