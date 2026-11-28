@@ -31,7 +31,7 @@ const OFF_TOPIC: RegExp[] = [
   // sports
   /\b(world cup|fifa|ipl|cricket|football|soccer|tennis|nba|nfl|olympics?|match score|who won the (match|game)|premier league|kabaddi|badminton)\b/,
   // politics / news
-  /\b(election|elections|prime minister|chief minister|president of|politic\w*|modi|trump|biden|parliament|bjp|congress party|vote for|war in|ukraine|israel|breaking news|latest news)\b/,
+  /\b(world war|ww1|ww2|cold war|election|elections|prime minister|chief minister|president of|politic\w*|modi|trump|biden|parliament|bjp|congress party|vote for|war in|ukraine|israel|breaking news|latest news)\b/,
   // entertainment
   /\b(movie|movies|film|box office|netflix|song|songs|lyrics|album|celebrity|actor|actress|bollywood|hollywood|web series|anime|video game|gaming|minecraft|pubg|meme|joke|jokes|riddle|poem)\b/,
   // coding / tech help

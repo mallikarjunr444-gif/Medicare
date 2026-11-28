@@ -4,11 +4,14 @@ import { sha256Hex } from "./crypto";
 import { DOCTORS, systemPrompt } from "./doctors";
 import { evaluatePatientQuery, validateAiResponse } from "./safety";
 import { checkScope, scopeRefusal } from "./scope";
+import { fallbackReply, openingLine, planNext, topicsFor } from "./therapist";
 import { synthesizeSpeech } from "./tts";
 import type { Env, Query } from "./env";
 
 const LANGS: Record<string, string> = { kn: "Kannada (ಕನ್ನಡ script)", en: "English", hi: "Hindi (देवनागरी script)" };
 const MAX_TEXT = 4000;
+/** Kannada and Hindi need many more tokens per sentence than English, so the same budget cuts replies short. */
+export const maxTokensFor = (language: string) => (language === "en" ? 320 : 700);
 
 /** Only the consultation languages the prompts know about may reach the model. */
 export function normaliseLanguage(value: unknown): string {
@@ -197,21 +200,24 @@ async function streamWorkersAi(
   if (!env.AI) throw new Error("ai_binding_missing");
   const stallMs = Number(env.AI_STALL_MS) || STALL_MS;
   let lastErr: unknown;
+  let produced = false;
+  const emit = (t: string) => ((produced = true), onToken(t));
   for (const model of modelChain(env, language)) {
     try {
-      const out: any = await guarded(env.AI.run(model, { messages, stream: true, max_tokens: 320, temperature: 0.6 }), stallMs, signal);
+      const out: any = await guarded(env.AI.run(model, { messages, stream: true, max_tokens: maxTokensFor(language), temperature: 0.6 }), stallMs, signal);
       if (out === ABORTED) return "";
-      return await readSse(out as ReadableStream<Uint8Array>, onToken, signal, stallMs);
+      return await readSse(out as ReadableStream<Uint8Array>, emit, signal, stallMs);
     } catch (e) {
       lastErr = e;
-      if (!isModelGone(e)) throw e;
-      console.error("ai_model_unavailable", model, String((e as Error).message).slice(0, 160));
+      // Never switch model mid-reply, and a spent quota is shared by every model; anything else: try the backup model.
+      if (produced || signal.aborted || classifyAiError(e) === "quota") throw e;
+      console.error("ai_model_failed", model, String((e as Error).message).slice(0, 160));
     }
   }
   throw lastErr;
 }
 
-type OpenAiCfg = { base: string; key: string; model: string };
+type OpenAiCfg = { base: string; key: string; model: string; maxTokens?: number };
 
 /** Any OpenAI-compatible streaming endpoint (Groq, Gemini, OpenRouter…). */
 async function streamOpenAiCompatible(
@@ -226,7 +232,7 @@ async function streamOpenAiCompatible(
     res = await fetch(`${cfg.base.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${cfg.key}` },
-      body: JSON.stringify({ model: cfg.model, messages, stream: true, max_tokens: 320, temperature: 0.6 }),
+      body: JSON.stringify({ model: cfg.model, messages, stream: true, max_tokens: cfg.maxTokens ?? 320, temperature: 0.6 }),
       signal: AbortSignal.timeout(stallMs), // time to the first response headers
     });
   } catch (e) {
@@ -243,14 +249,14 @@ async function streamOpenAiCompatible(
 async function streamExternal(env: Env, messages: Chat[], language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
   const model = (language === "kn" || language === "hi" ? env.AI_MODEL_LARGE_EXTERNAL : env.AI_MODEL_EXTERNAL) ||
     env.AI_MODEL_EXTERNAL || "llama-3.3-70b-versatile";
-  return streamOpenAiCompatible({ base: env.AI_BASE_URL || "https://api.groq.com/openai/v1", key: env.AI_API_KEY!, model }, messages, onToken, signal, Number(env.AI_STALL_MS) || STALL_MS);
+  return streamOpenAiCompatible({ base: env.AI_BASE_URL || "https://api.groq.com/openai/v1", key: env.AI_API_KEY!, model, maxTokens: maxTokensFor(language) }, messages, onToken, signal, Number(env.AI_STALL_MS) || STALL_MS);
 }
 
 /** Optional second external provider (default OpenRouter), used only when the primary one has failed. */
-async function streamBackup(env: Env, messages: Chat[], _language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
+async function streamBackup(env: Env, messages: Chat[], language: string, onToken: (t: string) => void, signal: { aborted: boolean }): Promise<string> {
   return streamOpenAiCompatible({
     base: env.AI_FALLBACK_BASE_URL || "https://openrouter.ai/api/v1", key: env.AI_FALLBACK_API_KEY!,
-    model: env.AI_FALLBACK_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
+    model: env.AI_FALLBACK_MODEL || "meta-llama/llama-3.3-70b-instruct:free", maxTokens: maxTokensFor(language),
   }, messages, onToken, signal, Number(env.AI_STALL_MS) || STALL_MS);
 }
 
@@ -376,6 +382,10 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
   let turn = { aborted: false };
   // Which turn currently owns the doctor. An owner (not a bare flag) so a stuck turn can never lock the session.
   let owner: object | null = null;
+  // Therapist-style interview plan: which planned topics have already been asked in this session.
+  const asked = new Set<string>();
+  let seeded = false; // false until we know whether this is a fresh session or a reconnect
+  let opened = false;
 
   server.addEventListener("message", (ev: MessageEvent) => {
     let data: any;
@@ -389,6 +399,7 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
         return send({ type: "pong" });
       case "set_language":
         language = normaliseLanguage(data.language);
+        if (!opened) { opened = true; void openConsultation(); } // the doctor speaks first, like a real clinician
         return;
       case "stop":
       case "interrupt":
@@ -419,6 +430,32 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
     }
   });
 
+
+  /** The doctor greets first and asks the opening question. Reconnects to a session that already has messages stay silent. */
+  async function openConsultation() {
+    const mine = { aborted: false };
+    try {
+      const n = Number((await query(`SELECT count(*)::int AS n FROM messages WHERE session_id = $1`, [sessionId]))[0]?.n ?? 0);
+      seedAsked(n);
+      if (n > 0) return;
+      const content = openingLine(doctorId, language);
+      owner = mine;
+      await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [crypto.randomUUID(), sessionId, content]);
+      await sendVoice(content, mine);
+      send({ type: "message", role: "assistant", content, opening: true });
+    } catch (e) {
+      console.error("ws_open_failed", String((e as Error).message).slice(0, 160)); // the patient can still speak first
+    } finally {
+      if (owner === mine) owner = null;
+    }
+  }
+
+  /** After a reconnect, assume the earlier assistant turns walked through the plan in order. */
+  function seedAsked(assistantMessages: number) {
+    if (seeded) return;
+    seeded = true;
+    topicsFor(doctorId).slice(0, Math.max(0, assistantMessages - 1)).forEach((t) => asked.add(t.key));
+  }
 
   // The doctor watches the patient's camera. A small frame is described by a free vision model; if something is
   // notable the doctor asks about it, gently, like a clinician would. Observations are never stored or diagnosed.
@@ -485,6 +522,8 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
     const until = Date.now() + 15_000;
     while (owner && owner !== mine && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
     owner = mine;
+    let planned: ReturnType<typeof planNext> | null = null;
+    let partial = "";
     try {
       const gate = await chatAllowed(query, uid!, env);
       if (gate !== "ok") {
@@ -520,7 +559,11 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
           return text; /* fall back to original text */
         }
       })();
-      const [, prior, searchText] = await Promise.all([saveUser, loadHist, translate]);
+      const countAssistant = seeded
+        ? Promise.resolve(0)
+        : query(`SELECT count(*)::int AS n FROM messages WHERE session_id = $1 AND role = 'assistant'`, [sessionId]).then((r) => Number(r[0]?.n ?? 0)).catch(() => 0);
+      const [, prior, searchText, assistantCount] = await Promise.all([saveUser, loadHist, translate, countAssistant]);
+      seedAsked(assistantCount);
       // The history was read before the new message landed, so add it here (kept out of the DB race).
       const hist = normaliseHistory([...(prior as Chat[]).reverse(), { role: "user", content: text } as Chat]);
       // Deterministic emergency escalation runs before any AI reply (same rules as the Python service).
@@ -548,10 +591,14 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       }
       const refs = await retrieve(query, doctorId, searchText);
       const lang = LANGS[language] ?? language;
-      const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-3 short sentences, no markdown or lists.${refs}`;
-      const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist], language, (t) => send({ type: "token", token: t }), mine);
+      // Plan the next question from what the client has said so far (a therapist always knows what to ask next).
+      const clientText = [...hist.filter((m) => m.role === "user").map((m) => m.content), searchText].join(" \n ");
+      planned = planNext(doctorId, asked, clientText, asked.size + 1);
+      const sys = `${systemPrompt(doctorId)}\nCurrent consultation language: ${lang}. Respond entirely in ${lang}; use 1-3 short sentences, no markdown or lists.${refs}\n${planned.directive}`;
+      const reply = await streamAi(env, [{ role: "system", content: sys }, ...hist], language, (t) => ((partial += t), send({ type: "token", token: t })), mine);
       if (mine.aborted) return;
       const content = validateAiResponse(reply.trim()) || "I'm here. Could you tell me a little more?";
+      if (planned.topic) asked.add(planned.topic.key);
       // Voice first (so the browser does not also speak), then the final message; persisting is off the critical path.
       await sendVoice(content, mine);
       if (mine.aborted) return;
@@ -565,6 +612,21 @@ export async function handleWs(req: Request, env: Env, makeQuery: (e: Env) => Qu
       const kind = classifyAiError(e);
       // One structured line per failure: `wrangler tail` shows exactly why a reply failed.
       console.error("ws_turn_failed", JSON.stringify({ kind, status: (e as AiError).status ?? null, lang: language, doctor: doctorId, error: String((e as Error).message).slice(0, 200) }));
+      // Every provider failed. The consultation must not dead-end: keep what was already said, or ask the planned question.
+      if (!mine.aborted) {
+        try {
+          const topic = planned ? planned.topic : planNext(doctorId, asked, text, asked.size + 1).topic;
+          const cut = Math.max(partial.lastIndexOf("."), partial.lastIndexOf("?"), partial.lastIndexOf("!"), partial.lastIndexOf("।"));
+          const content = cut > 30 ? partial.slice(0, cut + 1).trim() : fallbackReply(doctorId, language, topic);
+          if (topic && !(cut > 30)) asked.add(topic.key);
+          await query(`INSERT INTO messages (id, session_id, role, content) VALUES ($1,$2,'assistant',$3)`, [crypto.randomUUID(), sessionId, content]);
+          await sendVoice(content, mine);
+          send({ type: "message", role: "assistant", content, degraded: true });
+          return;
+        } catch (e2) {
+          console.error("ws_fallback_failed", String((e2 as Error).message).slice(0, 160));
+        }
+      }
       send({
         type: "error",
         code: kind === "quota" ? "ai_quota" : kind === "transient" ? "ai_busy" : kind === "config" ? "ai_unconfigured" : "ai_error",
