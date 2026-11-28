@@ -8,6 +8,7 @@ import {
   LOGIN_MAX_PER_ACCOUNT, LOGIN_MAX_PER_IP_ACCOUNT, LOGIN_RETRY_AFTER_S, clientIp, throttleBlocked, throttleClear, throttleHit,
 } from "../security";
 import { audit } from "../audit";
+import { requireCaptcha } from "../captcha";
 import { verifySecondFactor } from "./mfa";
 import { appUrl, sendMail } from "../mailer";
 import { randomToken, sha256Hex } from "../crypto";
@@ -36,6 +37,7 @@ users.post("/register", async (c) => {
   const fullName = checkOptionalName(body.full_name, errs);
   const password = checkPassword(body.password, errs);
   finish(errs);
+  await requireCaptcha(c, body);
 
   const q = c.var.query;
   if ((await q("SELECT 1 FROM users WHERE email = $1", [email])).length) fail(409, "Email already registered");

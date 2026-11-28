@@ -1,0 +1,10 @@
+rules_version = '2';
+// MediCare does not use Firestore: all data lives in Postgres behind the API, which checks every request.
+// These rules deny every direct client read/write, so enabling Firestore later can never expose data by accident.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

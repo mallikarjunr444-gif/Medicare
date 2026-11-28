@@ -1,6 +1,7 @@
 import { Hono } from "hono/tiny";
 import type { MiddlewareHandler } from "hono";
 import { requireUser } from "../auth";
+import { audit } from "../audit";
 import { verifyFirebaseToken } from "../firebaseAuth";
 import type { AppVars, DbUser, Env } from "../env";
 import { fail, iso, validationError } from "../http";
@@ -208,6 +209,7 @@ function ownedCrud(opts: {
     const skip = intParam(c.req.query("skip"), 0, 0, 1_000_000, "skip");
     const limit = intParam(c.req.query("limit"), 50, 1, 200, "limit");
     const rows = await c.var.query(`SELECT * FROM ${table} WHERE user_id = $1 ORDER BY ${orderCol} DESC OFFSET $2 LIMIT $3`, [c.var.user!.id, skip, limit]);
+    await audit(c, c.var.user!.id, "records_listed", { table, count: rows.length }); // ids/counts only, never content
     return c.json(rows.map(opts.out));
   });
 
@@ -224,6 +226,7 @@ function ownedCrud(opts: {
   app.get("/:id", async (c) => {
     const r = (await c.var.query(`SELECT * FROM ${table} WHERE id = $1 AND user_id = $2`, [c.req.param("id"), c.var.user!.id]))[0];
     if (!r) fail(404, "Not found"); // same answer for "missing" and "someone else's"
+    await audit(c, c.var.user!.id, "record_read", { table, id: c.req.param("id") });
     return c.json(opts.out(r!));
   });
 

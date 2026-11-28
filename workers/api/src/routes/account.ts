@@ -1,11 +1,12 @@
 import { Hono } from "hono/tiny";
-import { BCRYPT_COST, clearAuthCookie, requireUser } from "../auth";
+import { BCRYPT_COST, clearAuthCookie, createAccessToken, requireUser, setAuthCookie } from "../auth";
+import { createChallenge, captchaEnabled, requireCaptcha } from "../captcha";
 import { audit } from "../audit";
-import { randomToken, sha256Hex } from "../crypto";
+import { hmacHex, randomInt, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import type { AppVars, DbUser, Env } from "../env";
 import { fail } from "../http";
 import { appUrl, sendMail } from "../mailer";
-import { clientIp, throttleBlocked, throttleHit } from "../security";
+import { LOGIN_MAX_PER_ACCOUNT, clientIp, throttleBlocked, throttleClear, throttleHit } from "../security";
 import { checkEmail, checkPassword, finish, readJson } from "../validate";
 import { mfa, verifySecondFactor } from "./mfa";
 import { sendVerificationEmail, userOut } from "./users";
@@ -46,6 +47,7 @@ account.post("/forgot-password", async (c) => {
   const errs: any[] = [];
   const email = checkEmail(body.email, errs);
   finish(errs);
+  await requireCaptcha(c, body);
   const q = c.var.query;
   const key = `forgot|${clientIp(c)}|${email}`;
   // Same response whether or not the account exists, and whether or not we are throttled (no enumeration).
@@ -172,4 +174,88 @@ account.delete("/me", requireUser, async (c) => {
   await audit(c, me.id, "account_deleted");
   clearAuthCookie(c);
   return c.json({ detail: "Account and personal data deleted" });
+});
+
+// ── ALTCHA challenge (self-hosted proof-of-work captcha) ─────────────────────
+account.get("/captcha/challenge", async (c) => {
+  if (!captchaEnabled(c.env)) return c.body(null, 204); // feature off: the widget stays hidden
+  return c.json(await createChallenge(c.env));
+});
+
+// ── Email one-time code sign-in ──────────────────────────────────────────────
+const OTP_TTL_MIN = 10;
+const OTP_MAX_ATTEMPTS = 5;
+const otpHash = (env: Env, uid: string, code: string) => hmacHex(env.JWT_SECRET_KEY, `otp|${uid}|${code}`);
+/** Password accounts without MFA only: a mailbox code must never be a way around a second factor. */
+const otpEligible = (u: DbUser | undefined): u is DbUser => !!u && u.is_active !== false && !u.is_guest && !!u.hashed_password?.startsWith("$2") && !u.mfa_enabled;
+
+account.post("/otp/request", async (c) => {
+  const body = await readJson(c.req.raw);
+  const errs: any[] = [];
+  const email = checkEmail(body.email, errs);
+  finish(errs);
+  await requireCaptcha(c, body);
+  const q = c.var.query;
+  const key = `otpreq|${clientIp(c)}|${email}`;
+  if (await throttleBlocked(q, key, 5)) return c.json(GENERIC);
+  await throttleHit(q, key, 3600);
+  const u = (await q("SELECT * FROM users WHERE email = $1", [email]))[0] as DbUser | undefined;
+  if (otpEligible(u)) {
+    const code = String(randomInt(1_000_000)).padStart(6, "0");
+    await q("DELETE FROM auth_tokens WHERE user_id = $1 AND kind = 'email_otp'", [u.id]);
+    await q(
+      `INSERT INTO auth_tokens (user_id, kind, token_hash, expires_at) VALUES ($1,'email_otp',$2, now() + make_interval(mins => ${OTP_TTL_MIN}))`,
+      [u.id, await otpHash(c.env, u.id, code)],
+    );
+    await sendMail(c.env, {
+      to: u.email,
+      subject: "Your MediCare sign-in code",
+      text: `Your sign-in code is ${code}\n\nIt expires in ${OTP_TTL_MIN} minutes and can be used once. If you did not request it, ignore this message and consider changing your password.`,
+    });
+    await audit(c, u.id, "otp_requested");
+  }
+  return c.json(GENERIC);
+});
+
+account.post("/otp/verify", async (c) => {
+  const body = await readJson(c.req.raw);
+  const errs: any[] = [];
+  const email = checkEmail(body.email, errs);
+  finish(errs);
+  const code = typeof body.code === "string" ? body.code.trim() : "";
+  const q = c.var.query;
+  const ipKey = `otpver|${clientIp(c)}|${email}`;
+  const acctKey = `otpver|acct|${email}`;
+  if ((await throttleBlocked(q, ipKey, 10)) || (await throttleBlocked(q, acctKey, LOGIN_MAX_PER_ACCOUNT))) {
+    return c.json({ detail: "Too many attempts. Try again later." }, 429, { "Retry-After": "900" });
+  }
+  const bad = async () => {
+    await throttleHit(q, ipKey, 900);
+    await throttleHit(q, acctKey, 900);
+    fail(401, "Invalid or expired code");
+  };
+  if (!/^\d{6}$/.test(code)) return bad();
+  const u = (await q("SELECT * FROM users WHERE email = $1", [email]))[0] as DbUser | undefined;
+  if (!otpEligible(u)) return bad();
+  // Every guess consumes one of 5 attempts, atomically, before the code is even compared.
+  const row = (
+    await q(
+      `UPDATE auth_tokens SET attempts = attempts + 1
+        WHERE id = (SELECT id FROM auth_tokens WHERE user_id = $1 AND kind = 'email_otp' AND used_at IS NULL AND expires_at > now() AND attempts < ${OTP_MAX_ATTEMPTS} ORDER BY id DESC LIMIT 1)
+        RETURNING id, token_hash`,
+      [u.id],
+    )
+  )[0];
+  if (!row || !timingSafeEqual(String(row.token_hash), await otpHash(c.env, u.id, code))) {
+    await audit(c, u.id, "otp_failed");
+    return bad();
+  }
+  const claimed = await q("UPDATE auth_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL RETURNING id", [row.id]);
+  if (!claimed.length) return bad(); // lost a race with a concurrent submission
+  await throttleClear(q, ipKey);
+  await q("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()), last_login_at = now() WHERE id = $1", [u.id]);
+  await audit(c, u.id, "login_success", { method: "email_otp" });
+  const token = await createAccessToken(c.env, u.id, u.token_version ?? 0);
+  setAuthCookie(c, token);
+  return c.json({ access_token: token, token_type: "bearer" });
 });

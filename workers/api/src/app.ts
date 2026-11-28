@@ -12,11 +12,13 @@ import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
 import { loadUser } from "./auth";
 import { originGuard } from "./security";
+import { appCheckGuard } from "./appcheck";
 import type { AppVars, Env, Query } from "./env";
 import { messages } from "./routes/messages";
 import { sessions } from "./routes/sessions";
 import { users } from "./routes/users";
 import { account } from "./routes/account";
+import { accessGrants, consents, doctor, fhir } from "./routes/care";
 import { authRoutes, healthRecords, profile, reportsRoutes } from "./routes/profile";
 import { psychology } from "./routes/psychology";
 import { psychClinical, psychObserver } from "./routes/psychClinical";
@@ -67,13 +69,14 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
       origin: (origin) => (c.env.CORS_ORIGINS.split(",").map((s) => s.trim()).includes(origin) ? origin : null),
       credentials: true,
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Authorization", "Content-Type"],
+      allowHeaders: ["Authorization", "Content-Type", "X-Firebase-AppCheck"],
       maxAge: 600,
     })(c, next),
   );
 
   // CSRF: refuse state-changing requests whose Origin is not an allowed frontend.
   app.use("/api/*", originGuard);
+  app.use("/api/*", appCheckGuard);
 
   // Per-identity limiter (Cloudflare's rate-limit binding). Skipped if unbound.
   app.use("/api/*", async (c, next) => {
@@ -117,6 +120,10 @@ export function createApp(makeQuery: (env: Env) => Query, opts: AppOptions = {})
   app.route("/api/v1/consultation-reports", consultationReports);
   app.route("/api/v1/doctor", doctorActions);
   app.route("/api/v1/users", account);
+  app.route("/api/v1/consents", consents);
+  app.route("/api/v1/access-grants", accessGrants);
+  app.route("/api/v1/doctor", doctor);
+  app.route("/api/v1/fhir", fhir);
   app.route("/api/v1/users", users);
   app.route("/api/v1/auth", authRoutes);
   app.route("/api/v1/profile", profile);

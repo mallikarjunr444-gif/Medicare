@@ -1,0 +1,10 @@
+rules_version = '2';
+// MediCare does not use Cloud Storage from the browser. Deny everything; patient documents must only ever be
+// served through the API after an ownership/authorisation check (never via public or signed-forever URLs).
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

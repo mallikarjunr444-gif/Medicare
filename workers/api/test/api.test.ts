@@ -35,6 +35,7 @@ beforeAll(async () => {
   await db.exec("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
   await db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
   await db.exec(readFileSync(new URL("../migrations/003_account_protection.sql", import.meta.url), "utf8"));
+  await db.exec(readFileSync(new URL("../migrations/004_open_source_integrations.sql", import.meta.url), "utf8"));
   app = createApp(() => async (text, params = []) => (await db.query(text, params as any[])).rows as any[]);
 });
 

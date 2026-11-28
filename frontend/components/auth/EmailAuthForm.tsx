@@ -5,8 +5,15 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth/AuthProvider'
+import { solveChallenge } from '@/lib/captcha'
 
-type Mode = 'signin' | 'signup' | 'forgot' | 'otp'
+type Mode = 'signin' | 'signup' | 'forgot' | 'otp' | 'emailreq' | 'emailcode'
+
+/** Fetches and solves the self-hosted ALTCHA challenge. Resolves undefined when the server has captcha switched off. */
+async function captchaProof(): Promise<string | undefined> {
+  const ch = await api.captchaChallenge()
+  return ch ? solveChallenge(ch) : undefined
+}
 
 const input = 'mt-1.5 block w-full min-h-11 rounded-xl border border-[#d2d2d7] bg-white px-3.5 text-[15px] text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#0071e3] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/25'
 const btn = 'inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#0071e3] px-6 text-sm font-medium text-white transition hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 disabled:cursor-not-allowed disabled:bg-[#0071e3]/40'
@@ -14,7 +21,7 @@ const link = 'font-medium text-[#0071e3] hover:underline focus-visible:outline-n
 
 /** Email + password sign-in / sign-up / forgot-password / authenticator-code step. Passwords never touch storage or URLs. */
 export function EmailAuthForm() {
-  const { signInWithPassword, signUpWithPassword, busy, error, clearError } = useAuth()
+  const { signInWithPassword, signUpWithPassword, signInWithEmailCode, busy, error, clearError } = useAuth()
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,13 +30,16 @@ export function EmailAuthForm() {
   const [otp, setOtp] = useState('')
   const [sentReset, setSentReset] = useState(false)
   const [sending, setSending] = useState(false)
-  const go = (m: Mode) => { clearError(); setMode(m); setSentReset(false) }
+  const [localError, setLocalError] = useState<string | null>(null)
+  const go = (m: Mode) => { clearError(); setLocalError(null); setMode(m); setSentReset(false); setOtp('') }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       if (mode === 'signup') {
-        await signUpWithPassword({ email: email.trim(), username: username.trim(), password, full_name: fullName.trim() || undefined })
+        setSending(true)
+        const captcha = await captchaProof()
+        await signUpWithPassword({ email: email.trim(), username: username.trim(), password, full_name: fullName.trim() || undefined, captcha })
         toast.success('Account created. Check your email to verify your address.')
       } else if (mode === 'signin') {
         const r = await signInWithPassword(email, password)
@@ -38,11 +48,21 @@ export function EmailAuthForm() {
         await signInWithPassword(email, password, otp.trim())
       } else if (mode === 'forgot') {
         setSending(true)
-        await api.forgotPassword(email.trim()).catch(() => undefined) // same message either way
+        setLocalError(null)
+        await api.forgotPassword(email.trim(), await captchaProof()).catch(() => undefined) // same message either way
         setSentReset(true)
+      } else if (mode === 'emailreq') {
+        setSending(true)
+        setLocalError(null)
+        await api.otpRequest(email.trim(), await captchaProof()) // identical reply whether or not the account exists
+        setMode('emailcode')
+      } else if (mode === 'emailcode') {
+        await signInWithEmailCode(email, otp)
       }
-    } catch {
-      /* the provider has put a readable message in `error` */
+    } catch (err) {
+      // Provider errors are shown via `error`; only our own steps (captcha, code request) need a message here.
+      if (mode === 'emailreq' || mode === 'signup') setLocalError('We could not complete the human check or reach the server. Please try again.')
+      void err
     } finally {
       setSending(false)
     }
@@ -71,7 +91,7 @@ export function EmailAuthForm() {
           </div>
         </>
       )}
-      {mode !== 'otp' && (
+      {mode !== 'otp' && mode !== 'emailcode' && (
         <div>
           <label htmlFor="ea-email" className="text-sm font-medium text-[#1d1d1f]">Email</label>
           <input id="ea-email" type="email" className={input} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -91,15 +111,22 @@ export function EmailAuthForm() {
           <p className="mt-1.5 text-xs text-[#6e6e73]">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
         </div>
       )}
-      {error && <p role="alert" className="rounded-xl bg-[#fff2f0] px-3.5 py-2.5 text-[13px] leading-5 text-[#b3261e]">{error}</p>}
+      {mode === 'emailcode' && (
+        <div>
+          <label htmlFor="ea-code" className="text-sm font-medium text-[#1d1d1f]">6-digit code from your email</label>
+          <input id="ea-code" className={input} inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} maxLength={6} required autoFocus />
+          <p className="mt-1.5 text-xs text-[#6e6e73]">If that address has an account, we have emailed a code. It expires in 10 minutes and works once.</p>
+        </div>
+      )}
+      {(error || localError) && <p role="alert" className="rounded-xl bg-[#fff2f0] px-3.5 py-2.5 text-[13px] leading-5 text-[#b3261e]">{error ?? localError}</p>}
       <button type="submit" className={btn} disabled={busy || sending}>
         {(busy || sending) && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
-        {mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'otp' ? 'Verify and sign in' : 'Sign in'}
+        {mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : mode === 'otp' || mode === 'emailcode' ? 'Verify and sign in' : mode === 'emailreq' ? 'Email me a code' : 'Sign in'}
       </button>
       <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-[#6e6e73]">
-        {mode === 'signin' && (<><button type="button" className={link} onClick={() => go('forgot')}>Forgot password?</button><button type="button" className={link} onClick={() => go('signup')}>Create an account</button></>)}
+        {mode === 'signin' && (<><button type="button" className={link} onClick={() => go('forgot')}>Forgot password?</button><button type="button" className={link} onClick={() => go('emailreq')}>Email me a code</button><button type="button" className={link} onClick={() => go('signup')}>Create an account</button></>)}
         {mode === 'signup' && <button type="button" className={link} onClick={() => go('signin')}>Already have an account? Sign in</button>}
-        {(mode === 'forgot' || mode === 'otp') && <button type="button" className={link} onClick={() => go('signin')}>Back to sign in</button>}
+        {(mode === 'forgot' || mode === 'otp' || mode === 'emailreq' || mode === 'emailcode') && <button type="button" className={link} onClick={() => go('signin')}>Back to sign in</button>}
       </div>
     </form>
   )

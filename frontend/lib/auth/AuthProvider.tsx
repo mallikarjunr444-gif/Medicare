@@ -21,7 +21,9 @@ interface AuthContextValue {
   signInWithGoogle: () => Promise<void>
   /** Email + password sign-in. Resolves { mfaRequired: true } when the account needs an authenticator/recovery code. */
   signInWithPassword: (email: string, password: string, otp?: string) => Promise<{ mfaRequired: boolean }>
-  signUpWithPassword: (data: { email: string; username: string; password: string; full_name?: string }) => Promise<void>
+  signUpWithPassword: (data: { email: string; username: string; password: string; full_name?: string; captcha?: string }) => Promise<void>
+  /** Sign in with the 6-digit code emailed by api.otpRequest (password accounts without two-step verification). */
+  signInWithEmailCode: (email: string, code: string) => Promise<void>
   /** True for email/password sessions (as opposed to Google). */
   isPasswordAccount: boolean
   signOut: () => Promise<void>
@@ -225,7 +227,23 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     }
   }, [finishEmailSession])
 
-  const signUpWithPassword = useCallback(async (data: { email: string; username: string; password: string; full_name?: string }) => {
+  const signInWithEmailCode = useCallback(async (email: string, code: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.otpVerify(email.trim(), code.trim())
+      useStore.getState().setAuth(res.access_token, { id: '', email, username: '', is_guest: false })
+      await finishEmailSession()
+    } catch (e) {
+      const r = (e as { response?: { status?: number } }).response
+      setError(r?.status === 429 ? 'Too many attempts. Please wait a few minutes and try again.' : 'That code is invalid or has expired. Request a new one.')
+      throw e
+    } finally {
+      setBusy(false)
+    }
+  }, [finishEmailSession])
+
+  const signUpWithPassword = useCallback(async (data: { email: string; username: string; password: string; full_name?: string; captcha?: string }) => {
     setBusy(true)
     setError(null)
     try {
@@ -259,8 +277,8 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, isPasswordAccount, signOut, retry, updateProfile, clearError }),
-    [status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, isPasswordAccount, signOut, retry, updateProfile, clearError],
+    () => ({ status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, signInWithEmailCode, isPasswordAccount, signOut, retry, updateProfile, clearError }),
+    [status, profile, error, busy, signInWithGoogle, signInWithPassword, signUpWithPassword, signInWithEmailCode, isPasswordAccount, signOut, retry, updateProfile, clearError],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

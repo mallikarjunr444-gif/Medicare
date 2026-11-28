@@ -1,5 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import type { ConsultationItem, ProfileUpdate, UserProfile } from '@/lib/types'
+import { getAppCheckToken } from '@/lib/appcheck'
+import type { AltchaChallenge } from '@/lib/captcha'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -61,6 +63,8 @@ apiClient.interceptors.request.use(
         token = null
       }
     }
+    const attest = await getAppCheckToken() // null unless Firebase App Check is configured for this build
+    if (attest) config.headers['X-Firebase-AppCheck'] = attest
     token = token ?? readToken()
     if (token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`
@@ -90,7 +94,7 @@ export const api = {
   getToken: readToken,
 
   // Auth
-  register: async (data: { email: string; username: string; password: string; full_name?: string }) => {
+  register: async (data: { email: string; username: string; password: string; full_name?: string; captcha?: string }) => {
     const response = await apiClient.post('/api/v1/users/register', data)
     return response.data
   },
@@ -126,7 +130,21 @@ export const api = {
   },
 
   // ── Account protection ────────────────────────────────────────────────────
-  forgotPassword: async (email: string) => (await apiClient.post('/api/v1/users/forgot-password', { email })).data as { detail: string },
+  forgotPassword: async (email: string, captcha?: string) => (await apiClient.post('/api/v1/users/forgot-password', { email, captcha })).data as { detail: string },
+  // Self-hosted ALTCHA challenge (204 = captcha switched off on the server) and email one-time-code sign-in.
+  captchaChallenge: async (): Promise<AltchaChallenge | null> => {
+    const r = await apiClient.get('/api/v1/users/captcha/challenge')
+    return r.status === 200 ? (r.data as AltchaChallenge) : null
+  },
+  otpRequest: async (email: string, captcha?: string) => (await apiClient.post('/api/v1/users/otp/request', { email, captcha })).data as { detail: string },
+  otpVerify: async (email: string, code: string) => (await apiClient.post('/api/v1/users/otp/verify', { email, code })).data as { access_token: string },
+  // Consent, doctor sharing and portability.
+  getConsents: async () => (await apiClient.get('/api/v1/consents')).data as { purpose: string; granted: boolean; version: string; decided_at: string | null }[],
+  setConsent: async (purpose: string, granted: boolean) => (await apiClient.post('/api/v1/consents', { purpose, granted })).data,
+  listAccessGrants: async () => (await apiClient.get('/api/v1/access-grants')).data as { id: number; doctor_name: string | null; doctor_email: string; scopes: string[]; expires_at: string | null; revoked: boolean }[],
+  grantAccess: async (doctor_email: string, scopes: string[], days: number) => (await apiClient.post('/api/v1/access-grants', { doctor_email, scopes, days })).data,
+  revokeAccess: async (id: number) => { await apiClient.delete(`/api/v1/access-grants/${id}`) },
+  exportFhir: async (): Promise<Blob> => (await apiClient.get('/api/v1/fhir/me', { responseType: 'blob' })).data as Blob,
   resetPassword: async (token: string, password: string) => (await apiClient.post('/api/v1/users/reset-password', { token, password })).data as { detail: string },
   verifyEmail: async (token: string) => (await apiClient.post('/api/v1/users/verify-email', { token })).data as { detail: string },
   requestVerification: async () => (await apiClient.post('/api/v1/users/request-verification', {})).data as { detail: string; sent: boolean },

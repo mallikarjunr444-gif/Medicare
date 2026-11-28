@@ -13,6 +13,12 @@ export interface Env {
   APP_URL?: string;
   /** Optional dedicated key for encrypting MFA secrets (defaults to a HKDF derivation of JWT_SECRET_KEY). */
   MFA_ENC_KEY?: string;
+  /** ALTCHA HMAC key. When set, registration, password recovery and email-OTP requests require a solved challenge. */
+  CAPTCHA_SECRET?: string;
+  /** Firebase App Check: when "true", every /api request must carry a valid X-Firebase-AppCheck token. */
+  APPCHECK_ENFORCE?: string;
+  /** Numeric Firebase project number (not the project id). */
+  APPCHECK_PROJECT_NUMBER?: string;
   // Vars
   ENVIRONMENT: string;
   CORS_ORIGINS: string;
@@ -85,4 +91,5 @@ export interface DbUser {
   mfa_enabled?: boolean;
   mfa_secret_enc?: string | null;
   mfa_last_step?: number | null;
+  role?: "patient" | "doctor";
 }

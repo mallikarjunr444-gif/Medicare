@@ -1,0 +1,28 @@
+name: Uptime check
+
+# Free uptime monitoring using GitHub Actions only. Every 30 minutes it requests the API health endpoint and the website;
+# a failure turns the run red and GitHub emails the repository's watchers. Best-effort: GitHub may delay or skip scheduled
+# runs, so this is a smoke alarm, not an SLA. For real alerting, point Uptime Kuma (self-hosted, MIT) at the same URLs.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      API_URL: ${{ vars.UPTIME_API_URL || 'https://medicare-api-prod.mallikarjunr444.workers.dev' }}
+      SITE_URL: ${{ vars.UPTIME_SITE_URL || 'https://medicare-web.mallikarjunr444.workers.dev' }}
+    steps:
+      - name: API health (database reachable)
+        run: |
+          body=$(curl -fsS --max-time 20 --retry 2 --retry-delay 5 "$API_URL/health")
+          echo "$body"
+          echo "$body" | grep -q '"status":"healthy"'
+      - name: Website responds
+        run: curl -fsS --max-time 20 --retry 2 --retry-delay 5 -o /dev/null -w "%{http_code}\n" "$SITE_URL/"

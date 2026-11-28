@@ -1,3 +1,4 @@
+import { scrubEvent } from "./scrub";
 import * as Sentry from "@sentry/cloudflare";
 import { createApp } from "./app";
 import { neonQuery } from "./db";
@@ -10,6 +11,8 @@ export default Sentry.withSentry(
     dsn: env.SENTRY_DSN,
     environment: env.ENVIRONMENT,
     tracesSampleRate: 0,
+    // DSN may point at Sentry or a self-hosted GlitchTip (Sentry-compatible). PII sending is off by default; scrub the rest.
+    beforeSend: (event: any) => scrubEvent(event),
   }),
   app,
 );

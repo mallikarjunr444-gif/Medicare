@@ -9,6 +9,7 @@ import { QueryProvider } from '@/components/providers/QueryProvider'
 import { AuthProvider } from '@/lib/auth/AuthProvider'
 import { AccountLinkHandler } from '@/components/auth/AccountLinkHandler'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { Analytics } from '@/components/Analytics'
 
 // Font variables with standard fallbacks ensuring offline compilation and robust loading
 const FONT_VARS = 'font-sans'
@@ -116,6 +117,7 @@ export default function RootLayout({
         <QueryProvider>
           <AuthProvider>
             <AccountLinkHandler />
+            <Analytics />
             <ErrorBoundary>
               <div id="app-content">{children}</div>
             </ErrorBoundary>

@@ -1,9 +1,10 @@
 import { Hono } from "hono/tiny";
 import { requireUser } from "../auth";
 import type { AppVars, Env } from "../env";
-import { fail, iso } from "../http";
+import { fail, iso, validationError } from "../http";
 import { intParam, readJson } from "../validate";
 import { runSafetyEval } from "../safety";
+import { audit } from "../audit";
 
 export const admin = new Hono<{ Bindings: Env; Variables: AppVars }>();
 admin.use("*", requireUser);
@@ -126,4 +127,15 @@ admin.post("/safety/eval", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const r = runSafetyEval(Number(b?.sample_size) || 20);
   return c.json({ suite: b?.benchmark_suite ?? "ALL", timestamp: new Date().toISOString(), ...r });
+});
+
+/** Only an administrator can change a role; users can never set their own (no endpoint reads `role` from a profile body). */
+admin.put("/users/:id/role", async (c) => {
+  const b = await readJson(c.req.raw);
+  if (b.role !== "patient" && b.role !== "doctor") validationError([{ loc: ["body", "role"], msg: "role must be 'patient' or 'doctor'", type: "value_error" }]);
+  const rows = await c.var.query("UPDATE users SET role = $2 WHERE id = $1 AND is_guest IS NOT TRUE RETURNING id", [c.req.param("id"), b.role]);
+  if (!rows.length) fail(404, "User not found");
+  if (b.role === "patient") await c.var.query("UPDATE access_grants SET revoked_at = now() WHERE doctor_id = $1 AND revoked_at IS NULL", [c.req.param("id")]);
+  await audit(c, c.var.user!.id, "role_changed", { target: c.req.param("id"), role: b.role });
+  return c.json({ id: c.req.param("id"), role: b.role });
 });
