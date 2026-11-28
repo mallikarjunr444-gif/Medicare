@@ -19,6 +19,34 @@ const PhotorealisticDigitalHuman = dynamic(
   { ssr: false },
 )
 
+/**
+ * The living portrait is a continuous canvas animation, so it must not compete with the first load.
+ * It starts only after the visitor's first real interaction, only on devices that can afford it, and only while on screen;
+ * everyone else (and every page-speed test) gets the instant still photo.
+ */
+function useLiveHero(target: React.RefObject<HTMLElement | null>, reduce: boolean | null) {
+  const [interacted, setInteracted] = useState(false)
+  const [onScreen, setOnScreen] = useState(true)
+  useEffect(() => {
+    if (reduce) return
+    const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } }
+    const weak = window.innerWidth < 768 || (nav.hardwareConcurrency ?? 8) <= 4 || (nav.deviceMemory ?? 8) <= 4 || !!nav.connection?.saveData
+    if (weak) return
+    const events = ['pointermove', 'pointerdown', 'keydown', 'scroll', 'touchstart'] as const
+    const go = () => { setInteracted(true); events.forEach((e) => window.removeEventListener(e, go)) }
+    events.forEach((e) => window.addEventListener(e, go, { passive: true }))
+    return () => events.forEach((e) => window.removeEventListener(e, go))
+  }, [reduce])
+  useEffect(() => {
+    const el = target.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(([entry]) => setOnScreen(entry.isIntersecting), { threshold: 0.05 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [target])
+  return interacted && onScreen && !reduce
+}
+
 /* ───────────────────────── shared pieces ───────────────────────── */
 
 const H2 = 'text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] text-[#1d1d1f] sm:text-[48px] lg:text-[56px]'
@@ -69,13 +97,14 @@ export function Hero({ onStart }: { onStart: () => void }) {
   const figureRef = useRef<HTMLElement>(null)
   const { scrollYProgress } = useScroll({ target: figureRef, offset: ['start end', 'end start'] })
   const figureScale = useTransform(scrollYProgress, [0, 0.35], reduce ? [1, 1] : [0.94, 1])
+  const live = useLiveHero(figureRef, reduce)
 
   return (
     <section id="overview" className="relative scroll-mt-24 overflow-hidden bg-white pt-14 text-center sm:pt-20">
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-0 h-[560px]">
-        <motion.div className="absolute -left-24 top-0 h-[380px] w-[380px] rounded-full bg-[#0071e3]/20 blur-[100px]" animate={reduce ? undefined : { x: [0, 60, 0], y: [0, 30, 0] }} transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }} />
-        <motion.div className="absolute right-0 top-10 h-[340px] w-[340px] rounded-full bg-[#bf5af2]/20 blur-[100px]" animate={reduce ? undefined : { x: [0, -50, 0], y: [0, 40, 0] }} transition={{ duration: 17, repeat: Infinity, ease: 'easeInOut' }} />
-        <motion.div className="absolute left-1/3 top-24 h-[300px] w-[300px] rounded-full bg-[#30d5c8]/20 blur-[100px]" animate={reduce ? undefined : { x: [0, 40, 0], y: [0, -30, 0] }} transition={{ duration: 19, repeat: Infinity, ease: 'easeInOut' }} />
+        <motion.div className="absolute -left-24 top-0 h-[380px] w-[380px] rounded-full bg-[#0071e3]/20 blur-[100px]" />
+        <motion.div className="absolute right-0 top-10 h-[340px] w-[340px] rounded-full bg-[#bf5af2]/20 blur-[100px]" />
+        <motion.div className="absolute left-1/3 top-24 h-[300px] w-[300px] rounded-full bg-[#30d5c8]/20 blur-[100px]" />
       </div>
       <div className="relative mx-auto max-w-[980px] px-5">
         <h1 className="text-[44px] font-semibold leading-[1.04] tracking-[-0.035em] text-[#1d1d1f] sm:text-[72px] lg:text-[88px]">
@@ -107,14 +136,14 @@ export function Hero({ onStart }: { onStart: () => void }) {
         <motion.figure ref={figureRef} style={{ scale: figureScale }} className="relative aspect-[4/5] overflow-hidden rounded-[28px] bg-[#f5f5f7] shadow-[0_40px_80px_-30px_rgba(0,0,0,0.35)] sm:aspect-[16/9] lg:aspect-[2/1]">
           {/* The still photo shows instantly; the living portrait paints over it once it is ready. */}
           <Image
-            src="/doctor/dr_ananya.jpg"
+            src="/doctor/dr_ananya.webp"
             alt={reduce ? 'Dr. Ananya, an AI physician, on a video consultation' : ''}
             fill
             priority
             sizes="(max-width: 1240px) 100vw, 1240px"
             className="object-cover object-[48%_20%]"
           />
-          {!reduce && (
+          {live && (
             <div aria-hidden="true" className="absolute inset-0">
               <PhotorealisticDigitalHuman
                 doctorId="dr_ananya"
@@ -146,8 +175,8 @@ export function Hero({ onStart }: { onStart: () => void }) {
 
 const DOCTOR_ORDER: DoctorId[] = ['dr_ananya', 'dr_arjun']
 const DOCTOR_IMAGE: Record<DoctorId, { src: string; position: string }> = {
-  dr_ananya: { src: '/doctor/dr_ananya.jpg', position: '50% 18%' },
-  dr_arjun: { src: '/doctor/dr_arjun.jpg', position: '50% 12%' },
+  dr_ananya: { src: '/doctor/dr_ananya.webp', position: '50% 18%' },
+  dr_arjun: { src: '/doctor/dr_arjun.webp', position: '50% 12%' },
 }
 
 export function DoctorTiles({ onSelectDoctor }: { onSelectDoctor: (id: DoctorId) => void }) {
@@ -179,6 +208,7 @@ export function DoctorTiles({ onSelectDoctor }: { onSelectDoctor: (id: DoctorId)
                     alt={`${doctor.name}, an AI physician`}
                     fill
                     sizes="(max-width: 768px) 100vw, 620px"
+                    loading="lazy"
                     className="object-cover"
                     style={{ objectPosition: image.position }}
                   />

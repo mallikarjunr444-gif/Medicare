@@ -242,7 +242,7 @@ export function LanguageViewer({ onStart }: { onStart: () => void }) {
         <p className="ml-auto w-fit max-w-[88%] rounded-[22px] rounded-br-md bg-[#0071e3] px-5 py-3.5 text-[19px] leading-[1.6] text-white sm:text-[22px]">{ask}</p>
         <div className="flex items-end gap-3">
           <span className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-full ring-2 transition-shadow ${speaking ? 'ring-[#2997ff] shadow-[0_0_0_6px_rgba(41,151,255,0.25)]' : 'ring-white/20'}`}>
-            <Image src="/doctor/dr_ananya.jpg" alt="Dr. Ananya" fill sizes="44px" className="object-cover object-[50%_18%]" />
+            <Image src="/doctor/dr_ananya.webp" alt="Dr. Ananya" fill sizes="44px" className="object-cover object-[50%_18%]" />
           </span>
           <div className={`w-fit max-w-[88%] rounded-[22px] rounded-bl-md bg-[#1d1d1f] px-5 py-3.5 transition-shadow ${speaking ? 'shadow-[0_0_0_2px_rgba(41,151,255,0.6)]' : ''}`}>
             <p aria-live="polite" className="text-[19px] leading-[1.6] text-[#f5f5f7] sm:text-[22px]">{reply}</p>
@@ -276,7 +276,7 @@ export function LanguageViewer({ onStart }: { onStart: () => void }) {
 /* ───────────────── compare the doctors ───────────────── */
 
 const COMPARE_ORDER: DoctorId[] = ['dr_ananya', 'dr_arjun']
-const COMPARE_IMAGE: Record<DoctorId, string> = { dr_ananya: '/doctor/dr_ananya.jpg', dr_arjun: '/doctor/dr_arjun.jpg' }
+const COMPARE_IMAGE: Record<DoctorId, string> = { dr_ananya: '/doctor/dr_ananya.webp', dr_arjun: '/doctor/dr_arjun.webp' }
 const COMPARE_FOCUS: Record<DoctorId, string> = {
   dr_ananya: 'Lab reports, wellness and lifestyle questions',
   dr_arjun: 'Symptom check, triage and prevention',
