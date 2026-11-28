@@ -69,6 +69,8 @@ export interface ConsultationSummaryData {
   recommendedNextSteps: string[]
   referralRecommendation: string
   disclaimer: string
+  /** Present for Dr. Ananya (psychology) consultations; the modal shows it instead of the symptom layout. */
+  psychReport?: import('./psychReport').PsychReport
 }
 
 export const DOCTORS: Record<DoctorId, DoctorProfile> = {

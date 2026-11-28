@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
-import { useHumanCheck, type HumanCheck } from '@/lib/vision/useHumanCheck'
+import { useHumanCheck, preloadHumanCheck, type HumanCheck } from '@/lib/vision/useHumanCheck'
 import {
   CameraOff,
   Mic,
@@ -126,6 +126,9 @@ export function PatientWebcamPiP({
     setupCamera()
     return () => { active = false; release() }
   }, [isCameraOn, retryToken])
+
+  // Start downloading the detectors now, in parallel with the browser's camera permission prompt.
+  useEffect(() => { preloadHumanCheck() }, [])
 
   // Is it a person? Runs only while the camera is live.
   const human = useHumanCheck(videoRef, isCameraOn && cameraStatus === 'live')

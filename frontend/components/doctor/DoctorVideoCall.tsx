@@ -50,6 +50,7 @@ import { useDoctorSpeech } from './useDoctorSpeech'
 import { useConsultationSpeechRecognition } from './useConsultationSpeechRecognition'
 import { api } from '@/lib/api'
 import { useDoctorBackendSession } from './useDoctorBackendSession'
+import { buildPsychReport } from '@/lib/psychReport'
 import { ConsultationSummaryModal } from './ConsultationSummaryModal'
 import { ReportUploadDrawer } from './ReportUploadDrawer'
 import { SpecialistBookingModal, type Specialist } from './SpecialistBookingModal'
@@ -818,6 +819,13 @@ export function DoctorVideoCall({
           : activeTriage === 3
             ? 'A clinician review may be appropriate based on the symptoms discussed.'
             : 'No referral was suggested based on the information shared in this conversation.',
+      psychReport: doctorId === 'dr_ananya'
+        ? buildPsychReport({
+            clientStatements: patientStatements.map((entry) => entry.text),
+            triageLevel: activeTriage,
+            recordedDuration: sessionMemoryRef.current.duration || undefined,
+          })
+        : undefined,
       disclaimer:
         'MediCare is an AI virtual medical assistant and is not an autonomous licensed doctor. No clinical diagnosis, prescription, or regulated medical service is provided. In emergencies, call 112 immediately.',
     }

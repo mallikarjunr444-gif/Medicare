@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { ConsultationSummaryData } from '@/lib/doctorTypes'
+import { psychReportText, type PsychReport } from '@/lib/psychReport'
 
 interface ConsultationSummaryModalProps {
   summary: ConsultationSummaryData | null
@@ -30,6 +31,13 @@ interface ConsultationSummaryModalProps {
 /* ── plain-text / print builders ───────────────────────────── */
 
 function buildSummaryText(s: ConsultationSummaryData): string {
+  if (s.psychReport) {
+    return `MEDICUS CARE — ${s.doctorName.toUpperCase()}
+Record ID: #${s.id.slice(0, 8).toUpperCase()} | Date: ${s.consultationDate} | Language: ${s.languageLabel} | Duration: ${s.durationFormatted}
+
+${psychReportText(s.psychReport)}
+`
+  }
   return `MEDICUS CARE — CLINICAL CONSULTATION SUMMARY
 =====================================================
 Record ID: #${s.id.slice(0, 8).toUpperCase()}
@@ -69,6 +77,26 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
+function buildPsychPrintBody(r: PsychReport): string {
+  const e = escapeHtml
+  const list = (items: string[]) => `<ul>${items.map((x) => `<li>${e(x)}</li>`).join('')}</ul>`
+  return `
+  <h2>Presenting concern</h2><p>${e(r.presentingConcern)}</p>
+  <h2>Client’s own words</h2>${list(r.clientWords.map((w) => `“${w}”`))}
+  <h2>Onset and duration</h2><p>${e(r.onsetAndDuration)}</p>
+  <h2>Areas reviewed</h2>
+  <table><tr><th>Area</th><th>Status</th><th>Client’s words</th></tr>${r.domains
+    .map((d) => `<tr><td>${e(d.label)}</td><td>${d.reported ? 'Reported' : 'Not discussed'}</td><td>${e(d.evidence.map((x) => `“${x}”`).join(' · '))}</td></tr>`)
+    .join('')}</table>
+  <h2>Strengths and coping</h2>${list(r.strengths.length ? r.strengths : ['None mentioned'])}
+  <h2>Risk screening</h2><p class="${r.risk.level === 'concern_stated' ? 'alert' : ''}">${e(r.risk.note)}</p>
+  <h2>Impression (not a diagnosis)</h2><p>${e(r.impression)}</p>
+  <h2>Recommendations</h2><ol>${r.plan.map((x) => `<li>${e(x)}</li>`).join('')}</ol>
+  <h2>Not yet explored</h2>${list(r.notExplored)}
+  <h2>Limitations</h2><p>${e(r.limitations)}</p>
+  <div class="sign">Reviewed by: ______________________ &nbsp; Qualification / Reg. no.: ______________ &nbsp; Date: __________</div>`
+}
+
 function buildPrintHtml(s: ConsultationSummaryData): string {
   const e = escapeHtml
   const symptoms = s.patientReportedSymptoms
@@ -95,11 +123,14 @@ function buildPrintHtml(s: ConsultationSummaryData): string {
   .chip { display: inline-block; border: 1px solid #cfe3da; background: #f1f8f4; border-radius: 999px; padding: 2px 9px; margin: 2px 5px 2px 0; font-size: 11.5px; }
   ul { margin: 4px 0; padding-left: 18px; }
   li { margin: 3px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; } th, td { border: 1px solid #e1e9e4; padding: 5px 8px; text-align: left; vertical-align: top; } th { background: #f1f8f4; }
+  .alert { border: 1.5px solid #b42318; background: #fef3f2; padding: 8px 10px; border-radius: 6px; }
+  .sign { margin-top: 26px; font-size: 11.5px; color: #405650; }
   .disclaimer { margin-top: 22px; padding-top: 10px; border-top: 1px solid #e1e9e4; font-size: 10.5px; color: #687b74; }
 </style></head>
 <body>
   <div class="head">
-    <h1>Clinical Consultation Summary</h1>
+    <h1>${s.psychReport ? 'Psychological Consultation Report' : 'Clinical Consultation Summary'}</h1>
     <div class="meta">MediCare · Record #${e(s.id.slice(0, 8).toUpperCase())} · ${e(s.consultationDate)}</div>
   </div>
   <div class="grid">
@@ -108,7 +139,7 @@ function buildPrintHtml(s: ConsultationSummaryData): string {
     <div><b>Duration</b>${e(s.durationFormatted)}</div>
     <div><b>Clinical assessment</b>Level ${s.triageLevel} — ${e(s.triageTitle)}</div>
   </div>
-  <h2>Patient-reported symptoms</h2>
+  ${s.psychReport ? buildPsychPrintBody(s.psychReport) : `  <h2>Patient-reported symptoms</h2>
   <div>${symptoms || '<span class="chip">None reported</span>'}</div>
   <p><b>Duration:</b> ${e(s.symptomDuration)} &nbsp;·&nbsp; <b>Relevant history:</b> ${e(s.relevantHistory)}</p>
   ${warnings}
@@ -116,6 +147,7 @@ function buildPrintHtml(s: ConsultationSummaryData): string {
   <ul>${s.recommendedNextSteps.map((x) => `<li>${e(x)}</li>`).join('')}</ul>
   <h2>Human doctor referral</h2>
   <p>${e(s.referralRecommendation)}</p>
+  `}
   <div class="disclaimer"><b>Medical AI disclaimer:</b> ${e(s.disclaimer)}</div>
 </body></html>`
 }
@@ -257,7 +289,7 @@ export function ConsultationSummaryModal({
                   id="consultation-summary-title"
                   className="truncate text-base font-semibold tracking-tight sm:text-lg"
                 >
-                  Clinical Consultation Summary
+                  {summary.psychReport ? 'Psychological Consultation Report' : 'Clinical Consultation Summary'}
                 </h2>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-white/70">
                   <span className="inline-flex items-center gap-1">
@@ -336,6 +368,10 @@ export function ConsultationSummaryModal({
             </div>
           </div>
 
+          {summary.psychReport ? (
+            <PsychBody report={summary.psychReport} />
+          ) : (
+            <>
           {/* Patient-reported information */}
           <Section icon={User} title="Patient-reported information">
             <div className="rounded-xl border border-clinic-hairline bg-white p-3.5">
@@ -400,6 +436,8 @@ export function ConsultationSummaryModal({
               <p className="mt-0.5 leading-5">{summary.referralRecommendation}</p>
             </div>
           </div>
+            </>
+          )}
 
           {/* Regulatory disclaimer */}
           <div className="flex items-start gap-2.5 rounded-xl border border-clinic-hairline bg-clinic-porcelain p-3.5 text-[11px] leading-5 text-clinic-muted">
@@ -414,7 +452,7 @@ export function ConsultationSummaryModal({
         {/* Footer */}
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-clinic-hairline bg-clinic-porcelain px-4 py-3.5 sm:px-6">
           <span className="hidden text-[11px] text-clinic-muted sm:block">
-            AI-generated summary · not a medical diagnosis
+            AI-generated report · not a diagnosis · not reviewed by a clinician
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -494,5 +532,72 @@ function Fact({ label, value }: { label: string; value: string }) {
       <span className="shrink-0 text-clinic-muted">{label}:</span>
       <span className="font-medium text-clinic-ink">{value || 'Not recorded'}</span>
     </div>
+  )
+}
+
+function PsychBody({ report: r }: { report: PsychReport }) {
+  const alert = r.risk.level === 'concern_stated'
+  const card = 'rounded-xl border border-clinic-hairline bg-white p-3.5 text-xs leading-5 text-clinic-ink'
+  return (
+    <>
+      <Section icon={User} title="Presenting concern">
+        <p className={card}>{r.presentingConcern}</p>
+        {r.clientWords.length > 1 && (
+          <ul className={`${card} space-y-1.5`}>
+            {r.clientWords.map((w, i) => (
+              <li key={i} className="border-l-2 border-clinic-teal/40 pl-2.5 italic text-clinic-muted">“{w}”</li>
+            ))}
+          </ul>
+        )}
+        <Fact label="Onset and duration" value={r.onsetAndDuration} />
+      </Section>
+
+      <Section icon={FileText} title="Areas reviewed">
+        <div className="overflow-hidden rounded-xl border border-clinic-hairline">
+          {r.domains.map((d) => (
+            <div key={d.key} className="flex items-start gap-3 border-b border-clinic-porcelain px-3.5 py-2.5 text-xs last:border-b-0">
+              <span className="w-40 shrink-0 font-semibold text-clinic-ink">{d.label}</span>
+              <span className={`w-24 shrink-0 font-semibold ${d.reported ? 'text-clinic-teal' : 'text-clinic-muted'}`}>
+                {d.reported ? 'Reported' : 'Not discussed'}
+              </span>
+              <span className="italic text-clinic-muted">{d.evidence.map((x) => `“${x}”`).join(' · ')}</span>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section icon={CheckCircle2} title="Strengths and coping">
+        <p className={card}>{r.strengths.length ? r.strengths.join(' · ') : 'None mentioned in this session.'}</p>
+      </Section>
+
+      <Section icon={ShieldAlert} title="Risk screening" tone={alert ? 'amber' : 'teal'}>
+        <p className={`rounded-xl border p-3.5 text-xs leading-5 ${alert ? 'border-red-300 bg-red-50 font-semibold text-red-800' : 'border-clinic-hairline bg-white text-clinic-ink'}`}>{r.risk.note}</p>
+      </Section>
+
+      <Section icon={Stethoscope} title="Impression (not a diagnosis)">
+        <p className={card}>{r.impression}</p>
+      </Section>
+
+      <Section icon={ArrowRight} title="Recommendations">
+        <ol className="space-y-2.5 rounded-xl border border-clinic-hairline bg-clinic-porcelain p-3.5">
+          {r.plan.map((step, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-xs text-clinic-ink">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-clinic-teal text-[10px] font-bold text-white">{i + 1}</span>
+              <span className="pt-0.5 leading-5">{step}</span>
+            </li>
+          ))}
+        </ol>
+      </Section>
+
+      <Section icon={AlertTriangle} title="Not yet explored">
+        <ul className={`${card} grid gap-x-4 gap-y-1 sm:grid-cols-2`}>
+          {r.notExplored.map((n, i) => <li key={i} className="text-clinic-muted">• {n}</li>)}
+        </ul>
+      </Section>
+
+      <p className="rounded-xl border border-clinic-hairline bg-clinic-porcelain p-3.5 text-[11px] leading-5 text-clinic-muted">
+        <span className="font-semibold text-clinic-ink">Limitations: </span>{r.limitations}
+      </p>
+    </>
   )
 }
