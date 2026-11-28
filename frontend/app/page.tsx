@@ -17,19 +17,11 @@ import {
 } from 'lucide-react'
 import { SiteNav } from '@/components/site/SiteNav'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { SignInDialog } from '@/components/auth/SignInDialog'
 import { UserMenu } from '@/components/auth/UserMenu'
-import { ProfilePage } from '@/components/profile/ProfilePage'
 import { useAuth } from '@/lib/auth/AuthProvider'
 import { ScrollProgress } from '@/components/ui/scroll-progress'
 import { ClosingCta, DoctorTiles, Faq, FeatureTiles, Hero, HowItWorks, Safety, SiteFooter } from '@/components/site/HomeSections'
 import { CompareDoctors, HighlightChips, HighlightsGallery, LanguageViewer, LocalNav } from '@/components/site/ProductSections'
-import { PatientDashboard } from '@/components/patient/PatientDashboard'
-import { PsychologyConsultation } from '@/components/psychology/PsychologyConsultation'
-import { ObserverPage } from '@/components/psychology/ObserverPage'
-import { WellnessSession } from '@/components/wellness/WellnessSession'
-import { PatientNotesPanel } from '@/components/patient/PatientNotesPanel'
-import { AppointmentWorkspace } from '@/components/patient/AppointmentWorkspace'
 import { SpecialistBookingModal, type AppointmentRequestResult } from '@/components/doctor/SpecialistBookingModal'
 import type { DoctorId } from '@/lib/doctorTypes'
 
@@ -53,6 +45,15 @@ const AdminKnowledgeDashboard = dynamic(
   () => import('@/components/admin/AdminKnowledgeDashboard').then((m) => m.AdminKnowledgeDashboard),
   { ssr: false, loading: () => <PanelLoader label="Loading knowledge console" /> },
 )
+
+const ProfilePage = dynamic(() => import('@/components/profile/ProfilePage').then((m) => m.ProfilePage), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const PatientDashboard = dynamic(() => import('@/components/patient/PatientDashboard').then((m) => m.PatientDashboard), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const PsychologyConsultation = dynamic(() => import('@/components/psychology/PsychologyConsultation').then((m) => m.PsychologyConsultation), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const ObserverPage = dynamic(() => import('@/components/psychology/ObserverPage').then((m) => m.ObserverPage), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const WellnessSession = dynamic(() => import('@/components/wellness/WellnessSession').then((m) => m.WellnessSession), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const PatientNotesPanel = dynamic(() => import('@/components/patient/PatientNotesPanel').then((m) => m.PatientNotesPanel), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const AppointmentWorkspace = dynamic(() => import('@/components/patient/AppointmentWorkspace').then((m) => m.AppointmentWorkspace), { ssr: false, loading: () => <PanelLoader label="Loading" /> })
+const SignInDialog = dynamic(() => import('@/components/auth/SignInDialog').then((m) => m.SignInDialog), { ssr: false, loading: () => null })
 
 function PanelLoader({ label }: Readonly<{ label: string }>) {
   return (

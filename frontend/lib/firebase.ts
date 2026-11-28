@@ -1,5 +1,7 @@
-import { getApps, initializeApp, type FirebaseApp } from 'firebase/app'
-import { browserLocalPersistence, browserSessionPersistence, getAuth, GoogleAuthProvider, setPersistence, type Auth } from 'firebase/auth'
+import type { FirebaseApp } from 'firebase/app'
+import type { Auth, GoogleAuthProvider } from 'firebase/auth'
+
+export type AuthSdk = typeof import('firebase/auth')
 
 /**
  * Firebase web config. These values identify the project and are PUBLIC by design (they ship in every
@@ -18,23 +20,29 @@ const config = {
 
 export const isFirebaseConfigured = Boolean(config.apiKey && config.authDomain && config.projectId && config.appId)
 
-let cached: { app: FirebaseApp; auth: Auth } | null = null
+let loading: Promise<{ app: FirebaseApp; auth: Auth; sdk: AuthSdk } | null> | null = null
 
-/** Browser only. Returns null when the build has no Firebase config (sign-in then reports "not configured"). */
-export function getFirebase(): { app: FirebaseApp; auth: Auth } | null {
-  if (typeof window === 'undefined' || !isFirebaseConfigured) return null
-  if (!cached) {
-    const app = getApps()[0] ?? initializeApp(config)
-    const auth = getAuth(app)
-    // Stay signed in across reloads and browser restarts. Falls back to per-tab storage if IndexedDB/localStorage is blocked.
-    setPersistence(auth, browserLocalPersistence).catch(() => setPersistence(auth, browserSessionPersistence).catch(() => undefined))
-    cached = { app, auth }
+/**
+ * Browser only. The Firebase SDK (about 110 KB) is fetched on demand instead of with the first page load, which keeps the
+ * landing page fast. Returns null when the build has no Firebase config (sign-in then reports "not configured").
+ */
+export function loadFirebase(): Promise<{ app: FirebaseApp; auth: Auth; sdk: AuthSdk } | null> {
+  if (typeof window === 'undefined' || !isFirebaseConfigured) return Promise.resolve(null)
+  if (!loading) {
+    loading = (async () => {
+      const [{ getApps, initializeApp }, sdk] = await Promise.all([import('firebase/app'), import('firebase/auth')])
+      const app = getApps()[0] ?? initializeApp(config)
+      const auth = sdk.getAuth(app)
+      // Stay signed in across reloads and browser restarts. Falls back to per-tab storage if IndexedDB/localStorage is blocked.
+      sdk.setPersistence(auth, sdk.browserLocalPersistence).catch(() => sdk.setPersistence(auth, sdk.browserSessionPersistence).catch(() => undefined))
+      return { app, auth, sdk }
+    })().catch((e) => { loading = null; throw e })
   }
-  return cached
+  return loading
 }
 
-export function googleProvider(): GoogleAuthProvider {
-  const p = new GoogleAuthProvider()
+export function googleProvider(sdk: AuthSdk): GoogleAuthProvider {
+  const p = new sdk.GoogleAuthProvider()
   p.addScope('email')
   p.addScope('profile')
   p.setCustomParameters({ prompt: 'select_account' })

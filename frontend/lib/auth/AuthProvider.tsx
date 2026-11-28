@@ -2,10 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { getRedirectResult, onIdTokenChanged, signInWithPopup, signInWithRedirect, signOut as firebaseSignOut, type User } from 'firebase/auth'
+import type { User } from 'firebase/auth'
 import { toast } from 'react-hot-toast'
 import { api, setFirebaseAuth } from '@/lib/api'
-import { getFirebase, googleProvider, isFirebaseConfigured } from '@/lib/firebase'
+import { loadFirebase, googleProvider, isFirebaseConfigured } from '@/lib/firebase'
 import type { ProfileUpdate, UserProfile } from '@/lib/types'
 import { useStore } from '@/store/useStore'
 
@@ -143,41 +143,62 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   }, [finishEmailSession])
 
   useEffect(() => {
-    const fb = getFirebase()
-    if (!fb) {
+    if (!isFirebaseConfigured) {
       if (!emailSession.current) setStatus((st) => (st === 'signed-in' ? st : 'signed-out'))
       return
     }
-    // Finishes a redirect sign-in (and reports its errors) when the page loads after Google sends the user back.
-    getRedirectResult(fb.auth).catch((e) => {
-      const code = codeOf(e)
-      if (!SILENT.has(code)) setError(describe(e))
-    })
-    return onIdTokenChanged(fb.auth, async (user) => {
-      userRef.current = user
-      if (!user) {
-        if (emailSession.current) return // an email/password session is active; Firebase has nothing to say
-        const hadUser = syncedUid.current !== null
-        syncedUid.current = null
-        setFirebaseAuth(null, null)
-        setProfile(null)
-        setStatus('signed-out')
-        if (hadUser) resetLocalState()
+    let cancelled = false
+    let unsubscribe: (() => void) | undefined
+    const start = async () => {
+      let fb: Awaited<ReturnType<typeof loadFirebase>>
+      try { fb = await loadFirebase() } catch { fb = null }
+      if (cancelled) return
+      if (!fb) {
+        if (!emailSession.current) setStatus((st) => (st === 'signed-in' ? st : 'signed-out'))
         return
       }
-      const token = await user.getIdToken()
-      setFirebaseAuth(token, () => user.getIdToken())
-      if (syncedUid.current !== user.uid) {
-        if (syncedUid.current !== null) resetLocalState() // account switched in another tab
-        await sync(user)
-      }
-    })
+      const { auth, sdk } = fb
+      // Finishes a redirect sign-in (and reports its errors) when the page loads after Google sends the user back.
+      sdk.getRedirectResult(auth).catch((e) => {
+        const code = codeOf(e)
+        if (!SILENT.has(code)) setError(describe(e))
+      })
+      unsubscribe = sdk.onIdTokenChanged(auth, async (user) => {
+        userRef.current = user
+        if (!user) {
+          if (emailSession.current) return // an email/password session is active; Firebase has nothing to say
+          const hadUser = syncedUid.current !== null
+          syncedUid.current = null
+          setFirebaseAuth(null, null)
+          setProfile(null)
+          setStatus('signed-out')
+          if (hadUser) resetLocalState()
+          return
+        }
+        const token = await user.getIdToken()
+        setFirebaseAuth(token, () => user.getIdToken())
+        if (syncedUid.current !== user.uid) {
+          if (syncedUid.current !== null) resetLocalState() // account switched in another tab
+          await sync(user)
+        }
+      })
+    }
+    // Wait for the browser to be idle so the SDK never competes with the first paint; a returning visitor is restored right after.
+    const hasIdle = 'requestIdleCallback' in window
+    const handle = hasIdle ? window.requestIdleCallback(() => void start(), { timeout: 2500 }) : window.setTimeout(() => void start(), 800)
+    return () => {
+      cancelled = true
+      if (hasIdle) window.cancelIdleCallback(handle)
+      else window.clearTimeout(handle)
+      unsubscribe?.()
+    }
   }, [sync, resetLocalState])
 
   const signInWithGoogle = useCallback(async () => {
-    const fb = getFirebase()
+    let fb: Awaited<ReturnType<typeof loadFirebase>> = null
+    try { fb = await loadFirebase() } catch { /* handled below */ }
     if (!fb) {
-      const msg = isFirebaseConfigured ? 'Sign-in is only available in the browser.' : 'Google sign-in is not configured for this build yet.'
+      const msg = isFirebaseConfigured ? 'Sign-in could not start. Check your connection and try again.' : 'Google sign-in is not configured for this build yet.'
       setError(msg)
       toast.error(msg)
       return
@@ -185,12 +206,12 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
     setBusy(true)
     setError(null)
     try {
-      await signInWithPopup(fb.auth, googleProvider())
+      await fb.sdk.signInWithPopup(fb.auth, googleProvider(fb.sdk))
     } catch (e) {
       const code = codeOf(e)
       if (USE_REDIRECT.has(code)) {
         try {
-          await signInWithRedirect(fb.auth, googleProvider()) // leaves the page; result is handled on return
+          await fb.sdk.signInWithRedirect(fb.auth, googleProvider(fb.sdk)) // leaves the page; result is handled on return
           return
         } catch (re) {
           setError(describe(re))
@@ -204,9 +225,9 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   }, [])
 
   const signOut = useCallback(async () => {
-    const fb = getFirebase()
     try {
-      if (fb) await firebaseSignOut(fb.auth)
+      const fb = isFirebaseConfigured ? await loadFirebase() : null
+      if (fb) await fb.sdk.signOut(fb.auth)
       await api.logout() // revokes the server token and clears the cookie
       if (emailSession.current) {
         emailSession.current = false
